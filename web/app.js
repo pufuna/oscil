@@ -154,6 +154,7 @@ function onFrame(f) {
   TAPE.push(fr, [zeroRaw(0), zeroRaw(1)], Date.now() / 1000, (+S.fps || 33) / 1000);
   if (!frozen) process(fr);
   if (lastTraceChange === now) recFeed(fr, now);   // event recorder: every distinct acquisition, also while paused
+  trendPush();   // start-up trend: driven by frames, not by a timer (timers slow down in a background window)
   needDraw = true;
 }
 
@@ -1570,7 +1571,7 @@ const TR = { t: [], r: [[], []], f: [[], []], key: '' };
 const ST = { mode: 'trend', trig: null, i0: 0, i1: null, res: null };
 function trendPush() {
   const fr = cur; if (!fr || !fr.tdiv || performance.now() - lastFrameAt > 1500) return;
-  const key = fr.seq + ':' + lastTraceChange; if (key === TR.key || lastTraceChange < performance.now() - 1200) return; TR.key = key;
+  const key = lastTraceChange; if (key === TR.key || lastTraceChange < performance.now() - 1200) return; TR.key = key;
   const dtS = fr.tdiv / PXDIV, t = new Float64Array(N); for (let i = 0; i < N; i++) t[i] = i * dtS;
   const now = Date.now() / 1000;
   TR.t.push(now);
@@ -2128,7 +2129,6 @@ function initDrive() {
   bindNum('rpPpr', S.rpm, 'ppr'); bindNum('rpPoles', S.rpm, 'poles'); bindNum('rpFman', S.rpm, 'fman');
   $('rpFsrc').value = S.rpm.fsrc; $('rpFsrc').onchange = e => { S.rpm.fsrc = e.target.value; saveSettings(); needDraw = true; };
   startUI(); recInit(); anInit(); updInit();
-  setInterval(trendPush, 30);
 }
 
 // ---------------- init ----------------

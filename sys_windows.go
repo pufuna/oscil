@@ -252,7 +252,10 @@ func openWindow(url string) <-chan struct{} {
 	}
 	prof := filepath.Join(os.Getenv("LOCALAPPDATA"), AppName, "window")
 	cmd := exec.Command(b, "--app="+url, "--user-data-dir="+prof, "--no-first-run", "--no-default-browser-check",
-		"--window-size=1440,920", "--disable-features=Translate,msEdgeSidebarV2", "--disable-extensions")
+		"--window-size=1440,920", "--disable-features=Translate,msEdgeSidebarV2", "--disable-extensions",
+		// keep timers running at full speed when the window is minimized or covered: start-up trend,
+		// full-record reads and the event recorder must not slow down in the background
+		"--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows")
 	if err := cmd.Start(); err != nil {
 		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 		return nil
