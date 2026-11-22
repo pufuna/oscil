@@ -494,8 +494,10 @@ function measHTML(data) {
     const vd = data && data.vdiv[c], V = x => vd ? fmtC(c, x) : (x == null ? '—' : x.toFixed(2) + ' дел');
     const cell = (k, val) => `<div class="m"><span>${k}</span><b>${val}</b></div>`;
     const head = `<div class="mh"><i class="sq c${c + 1}"></i>${chName(c)}${data && vd ? ' · ' + vdivNameC(c, vd) : ''}${m && m.clipped ? ' · <span style="color:var(--warn)">выход за экран</span>' : ''}${on ? '' : ' · выкл'}</div>`;
-    if (!m) return `<div class="mcol">${head}${['Размах','Частота','Среднее','СКЗ'].map(k => cell(k, '—')).join('')}</div>`;
-    return `<div class="mcol">${head}${cell('Размах', V(m.pp))}${cell('Частота', m.freq ? si(m.freq, 'Гц', 4) : '—')}${cell('Среднее', V(m.avg))}${cell('СКЗ', V(m.rms))}${cell('Макс', V(m.max))}${cell('Мин', V(m.min))}${cell('Период', m.period ? fmtT(m.period) : '—')}${cell('Скважн.', m.duty ? m.duty.toFixed(1).replace('.', ',') + ' %' : '—')}${c === 1 && ph ? cell('Сдвиг к CH1', (ph.deg >= 0 ? '+' : '−') + Math.abs(ph.deg).toFixed(1).replace('.', ',') + '°') + cell('', ph.deg >= 0 ? 'отстаёт' : 'опережает') + cell('Задержка', ph.dt != null ? si(Math.abs(ph.dt), 'с', 3) : '—') : ''}</div>`;
+    // the set of cells is fixed (values become «—» when they can't be computed): a jittery signal must not make the block jump
+    const D = '—', q = m || {};
+    const phase = c === 1 ? cell('Сдвиг к CH1', ph ? (ph.deg >= 0 ? '+' : '−') + Math.abs(ph.deg).toFixed(1).replace('.', ',') + '°' : D) + cell('', ph ? (ph.deg >= 0 ? 'отстаёт' : 'опережает') : '') + cell('Задержка', ph && ph.dt != null ? si(Math.abs(ph.dt), 'с', 3) : D) : '';
+    return `<div class="mcol">${head}${cell('Размах', m ? V(q.pp) : D)}${cell('Частота', q.freq ? si(q.freq, 'Гц', 4) : D)}${cell('Среднее', m ? V(q.avg) : D)}${cell('СКЗ', m ? V(q.rms) : D)}${cell('Макс', m ? V(q.max) : D)}${cell('Мин', m ? V(q.min) : D)}${cell('Период', q.period ? fmtT(q.period) : D)}${cell('Скважн.', q.duty ? q.duty.toFixed(1).replace('.', ',') + ' %' : D)}${phase}</div>`;
   }).join('');
 }
 
@@ -1443,7 +1445,7 @@ function harmonicsOf(t, v, f1, a, b, kmax) {   // rectangular window over whole 
   for (let k = 1; k <= kmax; k++) { let re = 0, im = 0; const w = 2 * Math.PI * k * f1; for (let i = a; i < b; i++) { re += v[i] * Math.cos(w * t[i]); im -= v[i] * Math.sin(w * t[i]); } out.push({ k, rms: 2 * Math.hypot(re, im) / n / Math.SQRT2, ph: Math.atan2(im, re) }); }
   return out;
 }
-const tile = (label, val, sub = '', cls = '') => `<div class="tile ${cls}"><span>${label}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+const tile = (label, val, sub = '', cls = '') => `<div class="tile ${cls}"><span>${label}</span><b>${val}</b>${sub ? `<small title="${esc(String(sub).replace(/<[^>]*>/g, ''))}">${sub}</small>` : ''}</div>`;
 const pct = (x, d = 1) => x == null || !isFinite(x) ? '—' : x.toFixed(d).replace('.', ',') + ' %';
 const deg = (x, d = 1) => x == null || !isFinite(x) ? '—' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d).replace('.', ',') + '°';
 const fHz = x => x == null || !isFinite(x) ? '—' : si(x, 'Гц', 5);
@@ -1515,13 +1517,14 @@ function drawSync() {
     if (df != null && Math.abs(df) > 0.002 && Math.abs(df) <= 2) { const m = ((last.lead % 360) + 360) % 360, rem = df > 0 ? (360 - m) % 360 : m; eta = ` · совпадение фаз через ${(rem / 360 / Math.abs(df)).toFixed(1).replace('.', ',')} с`; }
     st.className = 'bigstate bad'; st.innerHTML = 'НЕ СИНХРОННО<small>вне допуска: ' + why + eta + '</small>';
   }
-  $('syncTiles').innerHTML = fresh ? [
+  if (fresh) drawSync.tiles = [
     tile('Частота сети (CH1)', fHz(last.f1)), tile('Частота ЧП (CH2)', fHz(last.f2)),
     tile('Разность частот Δf', df == null ? '—' : (df >= 0 ? '+' : '−') + Math.abs(df).toFixed(3).replace('.', ',') + ' Гц', df > 0 ? 'ЧП быстрее' : df < 0 ? 'ЧП медленнее' : '', okF ? 'ok' : 'bad'),
     tile('Угол Δφ', deg(last.lead), last.lead > 0 ? 'ЧП опережает' : 'ЧП отстаёт', okP ? 'ok' : 'bad'),
     tile('U сети (CH1)', fmtC(0, last.u1, 4)), tile('U ЧП (CH2)', fmtC(1, last.u2, 4)),
     tile('Разность ΔU', (dU >= 0 ? '+' : '') + pct(dU), '', okU ? 'ok' : 'bad'),
-  ].join('') : '';
+  ].join('');
+  $('syncTiles').innerHTML = drawSync.tiles || ''; $('syncTiles').classList.toggle('stale', !fresh);
   $('syncNote').textContent = sg ? srcNote(sg) + ' · фильтр ШИМ включён (≈1 кГц): частота и угол считаются по основной гармонике' + (UN(0) !== UN(1) ? ' · внимание: у каналов разные единицы' : '') : 'нет данных от прибора';
   miniScope('syncScope');
 }

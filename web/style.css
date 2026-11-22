@@ -333,3 +333,15 @@ select { cursor: pointer; }
 .updtok { margin-top: 10px; }
 .updtok summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .ver.new { background: var(--orange); color: #fff; cursor: pointer; }
+
+/* stable layout: blocks keep their size while values change (a jittery signal must not move the page) */
+.chips { flex-wrap: nowrap !important; overflow: hidden !important; }
+.mcol .mh { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.mcol .mh .sq { vertical-align: -1px; margin-right: 6px; }
+#stInfo, #syncNote, #pmNote, #anNote { min-height: 64px; }
+#pwNote { min-height: 116px; }
+.bigstate { min-height: 112px; }
+.tile { min-height: 70px; }
+.tiles.big .tile { min-height: 78px; }
+.tile b, .tile small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tiles.stale { opacity: .45; }
