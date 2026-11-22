@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>PUFService</title>
+<link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="48x48" href="icons/icon-48.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="256x256" href="icons/icon-256.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#035B6E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="var(--teal)"/><path d="M5 18h4l3-9 4 15 3-11 2 5h6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="26" cy="18" r="2.2" fill="var(--orange)"/></svg>
+    <div class="bt"><b>PUFService</b></div>
+  </div>
+  <div class="seg" id="modeSeg">
+    <button data-mode="live" class="on"><svg viewBox="0 0 24 24"><path d="M3 12h3l3-7 4 14 3-9 2 2h3"/></svg>Онлайн</button>
+    <button data-mode="files"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg>Записи</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="conn" id="conn" title="Состояние связи"><i class="dot"></i><span id="connText">поиск прибора…</span></div>
+  <button class="ibtn" id="bPort" title="Выбор порта"><svg viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0zM12 17v4"/></svg></button>
+  <button class="ibtn" id="bTheme" title="Светлая / тёмная тема"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg></button>
+  <span class="ver" id="ver">v1.3.0</span>
+</header>
+
+<div class="body">
+  <nav class="side" id="side">
+    <div class="navgrp" data-for="live">
+      <button data-view="scope" class="on"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M6 13l3-4 3 5 3-3 3 2"/><path d="M8 21h8"/></svg><span>Осциллограф</span></button>
+      <button data-view="pad"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="3"/><circle cx="12" cy="14" r="3"/><path d="M9 6h6"/></svg><span>Пульт прибора</span></button>
+      <button data-view="diag"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Диагностика</span></button>
+      <button data-view="sens"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>Датчики</span></button>
+      <button data-view="sync"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 12l4-6"/><path d="M12 3v2"/></svg><span>Синхроскоп</span></button>
+      <button data-view="power"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg><span>Мощность</span></button>
+      <button data-view="start"><svg viewBox="0 0 24 24"><path d="M3 20h18M4 17c3 0 3-12 6-12s3 8 6 8 3-3 5-3"/></svg><span>Пуск</span></button>
+      <button data-view="pwm"><svg viewBox="0 0 24 24"><path d="M3 17h3V7h3v10h2V7h5v10h2V7h3"/></svg><span>ШИМ</span></button>
+      <button data-view="rpm"><svg viewBox="0 0 24 24"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><path d="M4 19h16"/></svg><span>Обороты</span></button>
+    </div>
+    <div class="navgrp" data-for="files" hidden>
+      <button data-view="files" class="on"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg><span>Осциллограммы</span></button>
+    </div>
+    <div class="navfoot">
+      <button data-view="about"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg><span>О программе</span></button>
+    </div>
+  </nav>
+
+  <main id="main">
+    <!-- ============ LIVE: SCOPE ============ -->
+    <section class="view on" id="v-scope">
+      <div class="grid2">
+        <div class="col">
+          <div class="card plotcard">
+            <div class="plothead">
+              <div class="seg sm" id="liveKind"><button data-v="screen" class="on" title="Как на экране прибора">Экран</button><button data-v="deep" title="Полная запись из памяти прибора (в ~3 раза длиннее экрана)">Полная</button><button data-v="tape" title="Длинная запись: прошлое сохраняется">Лента</button><button data-v="spec" title="Спектр и гармоники">Спектр</button></div>
+              <div class="seg sm" id="specCh" hidden><button data-v="0" class="on c1">CH1</button><button data-v="1" class="c2">CH2</button></div>
+              <div class="seg sm" id="specScale" hidden><button data-v="lin" class="on">В</button><button data-v="db">дБ</button></div>
+              <div class="chips" id="liveChips"></div>
+              <div class="tools"><button class="tbtn" id="bNow" hidden title="Вернуться к текущему моменту"><svg viewBox="0 0 24 24"><path d="M5 12h12M13 6l6 6-6 6"/></svg></button>
+              <button class="tbtn" id="bTapeClr" hidden title="Очистить ленту"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>
+              <button class="tbtn" id="bFreeze" title="Пауза отображения (Пробел)"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>Пауза</button>
+              <button class="tbtn" id="bShot" title="Сохранить картинку PNG"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="4"/><path d="M8 6l2-3h4l2 3"/></svg>PNG</button>
+              <button class="tbtn" id="bCsv" title="Сохранить текущий кадр CSV"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h7M9 17h7M9 9h3"/></svg>CSV</button>
+              <button class="tbtn rec" id="bRec" title="Запись последовательности кадров"><i></i>Запись</button>
+            </div>
+            </div>
+            <div class="plotwrap" id="livePlotWrap"><canvas id="livePlot"></canvas><canvas id="tapePlot" style="visibility:hidden"></canvas><canvas id="specPlot" style="visibility:hidden"></canvas><canvas id="deepPlot" style="visibility:hidden"></canvas>
+              <div class="empty" id="liveEmpty"><div class="emptybox"><svg viewBox="0 0 24 24"><path d="M3 12h3l3-7 4 14 3-9 2 2h3"/></svg><b id="liveEmptyTitle">Нет данных от прибора</b><span id="liveEmptyHint">Подключите 2C53T кабелем USB и откройте режим осциллографа.</span></div></div>
+            </div>
+            <div class="meas" id="liveMeas"></div>
+          </div>
+        </div>
+        <div class="col side-col">
+          <div class="card">
+            <div class="ch"><b>Стабилизация</b><label class="sw"><input type="checkbox" id="stOn" checked><i></i></label></div>
+            <p class="hint">Программная синхронизация: картинка «привязывается» к фронту сигнала и не уезжает, даже если прибор не засинхронизирован.</p>
+            <div class="row"><span>Источник</span><div class="seg sm" id="stSrc"><button data-v="a" class="on" title="Канал с сигналом выбирается сам">авто</button><button data-v="0" class="c1">CH1</button><button data-v="1" class="c2">CH2</button></div></div>
+            <div class="row"><span>Фронт</span><div class="seg sm" id="stEdge"><button data-v="1" class="on">↗ нараст.</button><button data-v="-1">↘ спад</button></div></div>
+            <div class="row"><span>Уровень</span><div class="seg sm" id="stLvl"><button data-v="auto" class="on">авто</button><button data-v="man">вручную</button></div></div>
+            <div class="row"><span>Позиция</span><input type="range" id="stPos" min="10" max="290" value="150"></div>
+            <div class="row"><span>Усреднение</span><select id="avgN"><option value="1">выкл</option><option value="2">2 кадра</option><option value="4" selected>4 кадра</option><option value="8">8 кадров</option><option value="16">16 кадров</option></select></div>
+            <div class="row"><span>Достраивать</span><label class="sw" title="Заполнять края экрана копией соседнего периода (показано бледнее)"><input type="checkbox" id="fill" checked><i></i></label><span class="u">по периоду</span></div>
+            <div class="row"><span>Фильтр</span><select id="smooth" title="Сглаживание помех. «Сильный» убирает ШИМ на выходе частотника"><option value="0">выкл</option><option value="1">слабый</option><option value="2">средний</option><option value="3">сильный (ШИМ)</option></select></div>
+            <div class="row"><span>Послесвечение</span><label class="sw"><input type="checkbox" id="persist"><i></i></label></div>
+            <div class="stinfo" id="stInfo">—</div>
+          </div>
+          <div class="card">
+            <div class="ch"><b>Каналы и курсоры</b></div>
+            <div class="row"><span>Показывать</span><div class="seg sm multi" id="chShow"><button data-v="0" class="on c1">CH1</button><button data-v="1" class="on c2">CH2</button></div></div>
+            <div class="row"><span>Нуль каналов</span><div class="seg sm" id="zeroMode"><button data-v="dev" class="on" title="Положение нуля берётся из настроек прибора">из прибора</button><button data-v="man" title="Перетаскивайте метки слева">вручную</button></div></div>
+            <div class="row"><span>Курсоры</span><div class="seg sm" id="curMode"><button data-v="off" class="on">нет</button><button data-v="t">время</button><button data-v="v">напряж.</button></div></div>
+            <div class="cur" id="curOut"></div>
+            <p class="hint">Колёсико мыши над графиком — масштаб по времени, двойной щелчок — сброс. Нуль канала можно перетащить за метку слева.</p>
+          </div>
+          <div class="card">
+            <div class="ch"><b>Управление прибором</b><button class="lnk" data-goto="pad">весь пульт →</button></div>
+            <div class="row"><span>Развёртка</span><div class="tbset"><button class="sbtn" id="tbDn" title="Медленнее/быстрее">◀</button><select id="tbSel"></select><button class="sbtn" id="tbUp">▶</button></div></div>
+            <div class="minipad" id="miniPad"></div>
+            <div class="stinfo" id="ctlInfo">Кнопки работают после обучения на странице «Пульт прибора».</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ LIVE: PAD ============ -->
+    <section class="view" id="v-pad">
+      <div class="grid2">
+        <div class="col">
+          <div class="card">
+            <div class="ch"><b>Пульт прибора</b><span class="spacer"></span><div class="seg sm" id="pressMode"><button data-v="short" class="on">короткое нажатие</button><button data-v="long">длинное</button></div></div>
+            <p class="hint">Нажатия передаются в прибор так, как будто вы нажали кнопку на корпусе. Правая кнопка мыши — длинное нажатие.</p>
+            <div class="device">
+              <div class="dscreen"><canvas id="padPlot"></canvas><div class="dsinfo" id="padInfo"></div></div>
+              <div class="dkeys" id="bigPad"></div>
+            </div>
+            <div class="log" id="padLog"></div>
+          </div>
+        </div>
+        <div class="col side-col">
+          <div class="card">
+            <div class="ch"><b>Обучение кнопок</b></div>
+            <p class="hint">Прибор сообщает, какая кнопка нажата. Нажмите «Начать» и по подсказке нажимайте кнопки <b>на самом приборе</b> — программа запомнит, где какая.</p>
+            <div class="learn" id="learnBox">
+              <div class="lprompt" id="lPrompt">Обучение не выполнено</div>
+              <div class="lbtns"><button class="btn pri" id="lStart">Начать обучение</button><button class="btn" id="lSkip" hidden>Пропустить</button><button class="btn" id="lStop" hidden>Завершить</button></div>
+            </div>
+            <table class="kt" id="keyTable"></table>
+          </div>
+          <div class="card">
+            <div class="ch"><b>Длительность нажатий</b></div>
+            <div class="row"><span>Короткое</span><input type="number" id="holdShort" min="2" max="60" value="6"><span class="u">опросов</span></div>
+            <div class="row"><span>Длинное</span><input type="number" id="holdLong" min="72" max="250" value="90"><span class="u">опросов</span></div>
+            <div class="stinfo" id="scanInfo">частота опроса кнопок: —</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ LIVE: DIAG ============ -->
+    <section class="view" id="v-diag">
+      <div class="grid2">
+        <div class="col">
+          <div class="card">
+            <div class="ch"><b>Байты настроек прибора</b><span class="spacer"></span><span class="hint inl">подсвечено то, что менялось за последние 3 с</span></div>
+            <div class="hex" id="hexG"></div>
+            <div class="ch" style="margin-top:14px"><b>Системные байты (страница, язык, курсор меню)</b></div>
+            <div class="hex" id="hexS"></div>
+          </div>
+          <div class="card">
+            <div class="ch"><b>Память прибора</b><span class="spacer"></span><span class="hint inl" id="memInfo">нужна прошивка RU_USB4</span></div>
+            <p class="hint">Чтение любой области ОЗУ/флеш прибора (только чтение). Помогает найти, где прибор держит полную запись сигнала — график ниже рисует байты как осциллограмму.</p>
+            <div class="memctl">
+              <select id="memPreset">
+                <option value="200000F8:128">Настройки (G, 128 байт)</option>
+                <option value="200006A8:1024">Буфер А (G+0x5B0, 1024)</option>
+                <option value="20000AA8:1024">Буфер Б (G+0x9B0, 1024)</option>
+                <option value="20000EA8:256">Состояние захвата (G+0xDB0)</option>
+                <option value="2000044E:602">Экранный кадр (G+0x356)</option>
+                <option value="">свой адрес…</option>
+              </select>
+              <input id="memAddr" value="200006A8" spellcheck="false" title="адрес (hex)"><input id="memLen" type="number" value="1024" min="1" max="1024" title="байт">
+              <button class="btn pri" id="memRead">Прочитать</button>
+              <label class="sw" title="Обновлять 5 раз в секунду"><input type="checkbox" id="memAuto"><i></i></label><span class="u">авто</span>
+            </div>
+            <div class="memplot"><canvas id="memPlot"></canvas></div>
+            <div class="memhex" id="memHex"></div>
+          </div>
+        </div>
+        <div class="col side-col">
+          <div class="card">
+            <div class="ch"><b>Связь</b></div>
+            <div class="kv" id="linkKv"></div>
+          </div>
+          <div class="card">
+            <div class="ch"><b>Кнопки по номерам</b></div>
+            <p class="hint">Прямое нажатие K0…K14 — для проверки. Горят кнопки, нажатые на приборе.</p>
+            <div class="rawkeys" id="rawKeys"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ============ DRIVE: SENSORS ============ -->
+    <section class="view" id="v-sens">
+      <div class="sensgrid">
+        <div class="card sens" data-ch="0"></div>
+        <div class="card sens" data-ch="1"></div>
+        <div class="card hintcard">
+          <div class="ch"><b>Как это работает</b></div>
+          <p class="hint">Программа умножает напряжение на входе прибора на коэффициент и показывает результат в нужных единицах — везде: на графике, в измерениях, спектре, ленте, CSV и на страницах электропривода.</p>
+          <ul class="hint ul">
+            <li><b>ТН 6000/100</b>: на входе 100 В → показывается 6 кВ (коэффициент 60).</li>
+            <li><b>Клещи 10 мВ/А</b>: 10 мВ на входе = 1 А (коэффициент 100, единица А).</li>
+            <li><b>Шунт 1 мОм</b>: 1 мВ = 1 А (коэффициент 1000).</li>
+            <li>Настройку щупа ×1/×10 в самом приборе по-прежнему выставляйте на приборе — коэффициент здесь умножается сверху.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DRIVE: SYNCHROSCOPE ============ -->
+    <section class="view" id="v-sync">
+      <div class="grid2">
+        <div class="col">
+          <div class="card syncard">
+            <div class="syncwrap"><canvas id="syncDial"></canvas></div>
+            <div class="syncinfo">
+              <div class="bigstate" id="syncState">нет данных</div>
+              <div class="tiles" id="syncTiles"></div>
+              <div class="mscope"><canvas id="syncScope"></canvas></div>
+            </div>
+          </div>
+        </div>
+        <div class="col side-col">
+          <div class="card">
+            <div class="ch"><b>Синхроскоп</b></div>
+            <p class="hint">CH1 — сеть (опорное напряжение), CH2 — частотник (подгоняемое). Стрелка вращается по часовой, если частотник быстрее сети. Развёртка 5–10 мс/дел, чтобы на экране было 3–6 периодов.</p>
+            <div class="row"><span>Допуск Δf</span><input type="number" id="syTolF" step="0.01" min="0.01"><span class="u">Гц</span></div>
+            <div class="row"><span>Допуск Δφ</span><input type="number" id="syTolPhi" step="1" min="1"><span class="u">°</span></div>
+            <div class="row"><span>Допуск ΔU</span><input type="number" id="syTolU" step="0.5" min="0.5"><span class="u">%</span></div>
+            <div class="row"><span>Поправка угла</span><input type="number" id="syOff" step="1"><span class="u" title="если на CH1 и CH2 разные пары фаз, например Uab и Ua — поправка 30°">°</span></div>
+            <div class="stinfo" id="syncNote">—</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DRIVE: POWER ============ -->
+    <section class="view" id="v-power">
+      <div class="grid2">
+        <div class="col">
+          <div class="card">
+            <div class="ch"><b>Мощность и cos φ</b><span class="spacer"></span><span class="hint inl" id="pwSrc"></span></div>
+            <div class="tiles big" id="pwTiles"></div>
+            <div class="mscope tall"><canvas id="pwScope"></canvas></div>
+            <div class="ch" style="margin-top:12px"><b>Гармоники тока</b><span class="spacer"></span><span class="hint inl" id="pwThd"></span></div>
+            <div class="harm" id="pwHarm" style="padding:0"></div>
+          </div>
+        </div>
+        <div class="col side-col">
+          <div class="card">
+            <div class="ch"><b>Подключение</b></div>
+            <p class="hint">CH1 — напряжение, CH2 — ток (токовые клещи с выходом напряжения или шунт). Задайте коэффициенты на странице «Датчики», для CH2 — единица «А».</p>
+            <div class="row"><span>Сеть</span><select id="pwMult"><option value="1">однофазная</option><option value="3">3 фазы, симметричная (U фазное)</option></select></div>
+            <div class="row"><span>Инвертировать ток</span><label class="sw"><input type="checkbox" id="pwInv"><i></i></label></div>
+            <div class="stinfo" id="pwNote">—</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DRIVE: START ============ -->
+    <section class="view" id="v-start">
+      <div class="grid2">
+        <div class="col">
+          <div class="card">
+            <div class="ch"><b>Пуск двигателя</b><span class="spacer"></span><span class="chip" id="stState">тренд</span>
+              <button class="tbtn" id="stArm"><i class="armdot"></i>Ждать пуск</button>
+              <button class="tbtn" id="stStop">Стоп</button>
+              <button class="tbtn" id="stCsv"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h7M9 17h7M9 9h3"/></svg>CSV</button>
+            </div>
+            <div class="trendwrap"><canvas id="stChart"></canvas></div>
+            <div class="tiles" id="stTiles"></div>
+          </div>
+        </div>
+        <div class="col side-col">
+          <div class="card">
+            <div class="ch"><b>Запуск записи</b></div>
+            <p class="hint">Программа непрерывно считает СКЗ и частоту каждого кадра. «Ждать пуск» — запись начнётся, когда СКЗ выбранного канала превысит порог (с предысторией).</p>
+            <div class="row"><span>Канал</span><div class="seg sm" id="stCh"><button data-v="0" class="c1">CH1</button><button data-v="1" class="on c2">CH2</button></div></div>
+            <div class="row"><span>Порог</span><input type="number" id="stThr" step="any"><span class="u" id="stThrU">СКЗ</span></div>
+            <div class="row"><span>Номинал</span><input type="number" id="stNom" step="any"><span class="u" id="stNomU">для кратности</span></div>
+            <div class="row"><span>Предыстория</span><input type="number" id="stPre" step="1" min="0" max="30"><span class="u">с</span></div>
+            <div class="row"><span>Автостоп</span><label class="sw"><input type="checkbox" id="stAuto"><i></i></label><span class="u">когда ток устоялся 3 с</span></div>
+            <div class="stinfo">Развёртка 5–20 мс/дел (чтобы в кадре был хотя бы период). Для огибающей тока пуска удобно 20 мс/дел.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DRIVE: PWM ============ -->
+    <section class="view" id="v-pwm">
+      <div class="grid2">
+        <div class="col">
+          <div class="card">
+            <div class="ch"><b>Анализ ШИМ</b><span class="spacer"></span><span class="hint inl" id="pmSrc"></span></div>
+            <div class="tiles big" id="pmTiles"></div>
+            <div class="mscope tall"><canvas id="pmScope"></canvas></div>
+          </div>
+        </div>
+        <div class="col side-col">
+          <div class="card">
+            <div class="ch"><b>Сигнал</b></div>
+            <div class="row"><span>Канал</span><div class="seg sm" id="pmCh"><button data-v="0" class="on c1">CH1</button><button data-v="1" class="c2">CH2</button></div></div>
+            <p class="hint">Фронты (dV/dt, выброс) — на быстрой развёртке, чтобы фронт занимал несколько точек: 0,5–5 мкс/дел. Частота импульсов — 50–200 мкс/дел. Основная гармоника — 5–10 мс/дел.</p>
+            <div class="stinfo" id="pmNote">—</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DRIVE: RPM ============ -->
+    <section class="view" id="v-rpm">
+      <div class="grid2">
+        <div class="col">
+          <div class="card">
+            <div class="ch"><b>Обороты</b><span class="spacer"></span><span class="hint inl" id="rpSrc"></span></div>
+            <div class="rpmbig"><b id="rpVal">—</b><span>об/мин</span></div>
+            <div class="tiles" id="rpTiles"></div>
+            <div class="trendwrap small"><canvas id="rpChart"></canvas></div>
+          </div>
+        </div>
+        <div class="col side-col">
+          <div class="card">
+            <div class="ch"><b>Датчик</b></div>
+            <div class="row"><span>Импульсы на</span><div class="seg sm" id="rpCh"><button data-v="0" class="c1">CH1</button><button data-v="1" class="on c2">CH2</button></div></div>
+            <div class="row"><span>Имп./оборот</span><input type="number" id="rpPpr" min="1" step="1"></div>
+            <div class="row"><span>Пар полюсов</span><input type="number" id="rpPoles" min="1" step="1"></div>
+            <div class="row"><span>Частота питания</span><select id="rpFsrc"><option value="ch">с другого канала</option><option value="man">вручную</option></select></div>
+            <div class="row"><span></span><input type="number" id="rpFman" step="0.01"><span class="u">Гц (вручную)</span></div>
+            <p class="hint">Метка на валу, оптический или индуктивный датчик. Чтобы попасть хотя бы 2–3 импульса в запись: при 1500 об/мин и 1 имп./об — 10 мс/дел.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- ============ FILES ============ -->
+    <section class="view" id="v-files">
+      <div class="files">
+        <div class="card flist">
+          <div class="ch"><b>Осциллограммы</b><span class="spacer"></span><button class="ibtn sm" id="fRefresh" title="Обновить"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button></div>
+          <label class="btn pri wide"><input type="file" id="fOpen" multiple accept=".bin,.bmp,.csv,.BIN,.BMP,.CSV" hidden><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg>Открыть файлы…</label>
+          <div class="drop" id="fDrop">или перетащите сюда .bin, .bmp, .csv</div>
+          <div class="fl" id="fList"></div>
+        </div>
+        <div class="col">
+          <div class="card plotcard">
+            <div class="plothead">
+              <div class="chips" id="fileChips"></div>
+              <div class="tools">
+              <div class="seg sm" id="fView"><button data-v="plot" class="on">график</button><button data-v="shot">снимок экрана</button></div>
+              <button class="tbtn" id="fPng"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="4"/><path d="M8 6l2-3h4l2 3"/></svg>PNG</button>
+              <button class="tbtn" id="fCsv"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h7M9 17h7M9 9h3"/></svg>CSV</button>
+            </div>
+            </div>
+            <div class="plotwrap" id="filePlotWrap"><canvas id="filePlot"></canvas><img id="fileShot" hidden alt="">
+              <div class="empty" id="fileEmpty"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg><b>Выберите осциллограмму</b><span>Подключите прибор в режиме «USB Sharing» — записи найдутся сами. Или откройте файлы .bin (данные) и .bmp (снимок) вручную.</span></div>
+            </div>
+            <div class="meas" id="fileMeas"></div>
+          </div>
+          <div class="card">
+            <div class="ch"><b>Масштабы</b><span class="spacer"></span><span class="hint inl" id="fWarn"></span></div>
+            <div class="scales">
+              <label>Развёртка<select id="fTdiv"></select></label>
+              <label><i class="sq c1"></i>CH1, В/дел<select id="fV0"></select></label>
+              <label><i class="sq c2"></i>CH2, В/дел<select id="fV1"></select></label>
+              <div class="seg sm" id="fCur"><button data-v="off" class="on">без курсоров</button><button data-v="t">время</button><button data-v="v">напряжение</button></div>
+            </div>
+            <div class="row" id="fFrameRow" hidden><span>Кадр записи</span><input type="range" id="fFrame" min="0" max="0" value="0"><span class="u" id="fFrameTxt"></span></div>
+            <div class="cur" id="fCurOut"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ABOUT ============ -->
+    <section class="view" id="v-about">
+      <div class="card about">
+        <svg class="logo big" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="var(--teal)"/><path d="M5 18h4l3-9 4 15 3-11 2 5h6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="26" cy="18" r="2.2" fill="var(--orange)"/></svg>
+        <h2>PUFService <span class="ver" id="ver2">v1.3.0</span></h2>
+        <p>Программа для работы с осциллографом FNIRSI 2C53T с доработанной прошивкой <b>RU_USB4</b>: просмотр сигнала в реальном времени, программная стабилизация, удалённое управление кнопками и просмотр сохранённых осциллограмм.</p>
+        <ul>
+          <li>Онлайн-режим работает, когда прибор подключён кабелем и находится в режиме осциллографа.</li>
+          <li>Записи читаются с диска прибора в режиме «USB Sharing» (папки «Screenshot file» и скрытая «Screenshot simple file»).</li>
+          <li>Файлы PNG и CSV сохраняются в «Документы\PUFService».</li>
+        </ul>
+        <div class="lbtns"><button class="btn" id="bOpenOut">Открыть папку сохранений</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="portModal" hidden>
+  <div class="card mbox">
+    <div class="ch"><b>Подключение</b><span class="spacer"></span><button class="ibtn sm" data-close>✕</button></div>
+    <p class="hint">Обычно прибор находится автоматически. Если нет — выберите COM-порт вручную.</p>
+    <div class="plist" id="pList"></div>
+    <div class="lbtns"><button class="btn pri" id="pAuto">Автоматически</button><button class="btn" id="pOff">Отключиться</button></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script src="core.js"></script>
+<script src="tape.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
