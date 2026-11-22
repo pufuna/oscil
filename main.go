@@ -22,7 +22,7 @@ import (
 const AppName = "PUFService"
 
 // var (not const) so a test build can override it: -ldflags "-X main.AppVersion=…"
-var AppVersion = "1.5.3"
+var AppVersion = "1.6.0"
 
 const AppID = "pufservice"
 const FixedPort = 53153

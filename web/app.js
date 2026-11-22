@@ -266,7 +266,7 @@ function drawScope(cv, data, opts = {}) {
   g.X = X; g.Y = Y; g.v = v; g.toDiv = px => v.t0 + (px - g.ml) / g.pw * span; g.toDivY = py => 4 - (py - g.mt) / g.ph * 8;
   // grid
   ctx.lineWidth = 1;
-  const step = span > 6 ? 1 : span > 2 ? 0.5 : 0.2;
+  const step = span > 14 ? nice125(span / 12) : span > 6 ? 1 : span > 2 ? 0.5 : 0.2;   // long records (CSV, film strip): ~12 grid lines
   for (let d = Math.ceil(v.t0 / step) * step; d <= v.t1 + 1e-9; d += step) {
     const major = Math.abs(d - Math.round(d)) < 1e-6;
     ctx.strokeStyle = major ? cssVar('--grid2') : cssVar('--grid');
@@ -275,8 +275,10 @@ function drawScope(cv, data, opts = {}) {
   ctx.setLineDash([]);
   for (let d = -4; d <= 4; d++) { ctx.strokeStyle = cssVar('--grid2'); ctx.beginPath(); ctx.moveTo(g.ml, Math.round(Y(d)) + .5); ctx.lineTo(g.ml + g.pw, Math.round(Y(d)) + .5); ctx.stroke(); }
   ctx.strokeStyle = 'rgba(160,210,220,.45)'; ctx.beginPath();
-  ctx.moveTo(g.ml, Math.round(Y(0)) + .5); ctx.lineTo(g.ml + g.pw, Math.round(Y(0)) + .5); ctx.moveTo(Math.round(X(6)) + .5, g.mt); ctx.lineTo(Math.round(X(6)) + .5, g.mt + g.ph); ctx.stroke();
+  ctx.moveTo(g.ml, Math.round(Y(0)) + .5); ctx.lineTo(g.ml + g.pw, Math.round(Y(0)) + .5); if (!data || !data.seps) { ctx.moveTo(Math.round(X(6)) + .5, g.mt); ctx.lineTo(Math.round(X(6)) + .5, g.mt + g.ph); } ctx.stroke();
   if (!data) return g;
+  if (data.hl) { ctx.fillStyle = 'rgba(243,95,39,.09)'; const a = Math.max(g.ml, X(data.hl[0])), b = Math.min(g.ml + g.pw, X(data.hl[1])); if (b > a) ctx.fillRect(a, g.mt, b - a, g.ph); }   // highlighted span (current frame in the film strip)
+  if (data.seps && !(data.seps.length > 1 && X(data.seps[1]) - X(data.seps[0]) < 10)) { ctx.strokeStyle = 'rgba(243,95,39,.45)'; ctx.setLineDash([3, 4]); for (const d of data.seps) { if (d < v.t0 || d > v.t1) continue; const x = Math.round(X(d)) + .5; ctx.beginPath(); ctx.moveTo(x, g.mt); ctx.lineTo(x, g.mt + g.ph); ctx.stroke(); } ctx.setLineDash([]); }
   const colors = [cssVar('--ch1'), cssVar('--ch2')];
   ctx.save(); ctx.beginPath(); ctx.rect(g.ml, g.mt, g.pw, g.ph); ctx.clip();
   const trace = (y, c, alpha, lw, mask, want) => {
@@ -287,7 +289,7 @@ function drawScope(cv, data, opts = {}) {
       const find = u => { let lo = 0, hi = xs.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (xs[m] < u) lo = m; else hi = m; } return lo; };
       const i0 = find(u0), i1 = Math.min(xs.length - 1, find(u1) + 1);
       if (i1 - i0 > 3 * g.pw) {
-        const upp = (u1 - u0) / g.pw;
+        const upp = (u1 - u0) / g.pw; ctx.globalAlpha = alpha * 0.7;   // envelopes of both channels stay visible
         for (let col = 0, i = i0; col < g.pw; col++) {
           const ue = u0 + (col + 1) * upp; let mn = Infinity, mx = -Infinity, first = NaN, last = NaN;
           for (; i <= i1 && xs[i] < ue; i++) { const val = y[i]; if (isNaN(val)) continue; if (isNaN(first)) first = val; last = val; if (val < mn) mn = val; if (val > mx) mx = val; }
@@ -338,11 +340,11 @@ function drawScope(cv, data, opts = {}) {
   // time axis labels
   if (!opts.compact) {
     ctx.fillStyle = '#86A9B3'; ctx.font = '11px Inter, sans-serif'; ctx.textBaseline = 'top';
-    const lstep = span > 6 ? 2 : span > 3 ? 1 : 0.5;
+    const lstep = span > 14 ? nice125(span / 7) : span > 6 ? 2 : span > 3 ? 1 : 0.5;
     for (let d = Math.ceil(v.t0 / lstep) * lstep; d <= v.t1 + 1e-9; d += lstep) {
       const px = X(d); ctx.textAlign = px < g.ml + 20 ? 'left' : px > g.ml + g.pw - 20 ? 'right' : 'center';
       const ref = data.trigX != null ? data.trigX / PXDIV : 6;
-      ctx.fillText(data.tdiv ? si((d - ref) * data.tdiv, 'с', 3) : (d - ref).toFixed(1), px, g.mt + g.ph + 6);
+      ctx.fillText(data.xfmt ? data.xfmt(d) : data.tdiv ? si((d - ref) * data.tdiv, 'с', 3) : (d - ref).toFixed(1), px, g.mt + g.ph + 6);
     }
   }
   // cursors
@@ -360,7 +362,7 @@ function drawScope(cv, data, opts = {}) {
     const posOf = (c, i) => data.xs ? data.xs[c][i] : i;
     let i = idxOf(0);
     const ref = data.trigX != null ? data.trigX : (data.n === N ? 150 : data.n / 2);
-    const lines = [{ t: 't = ' + (data.tdiv ? si((fi - ref) * data.tdiv / PXDIV, 'с', 4) : (fi - ref).toFixed(1)), c: '#E8F3F6' }];
+    const lines = [{ t: data.xfmt ? data.xfmt(fi / PXDIV, true) : 't = ' + (data.tdiv ? si((fi - ref) * data.tdiv / PXDIV, 'с', 4) : (fi - ref).toFixed(1)), c: '#E8F3F6' }];
     const dots = [];
     for (const c of [0, 1]) {
       if (!data.on[c]) continue; i = idxOf(c); const val = data.y[c][i];
@@ -443,7 +445,14 @@ function attachPlotMouse(cv, getData, onChange) {
     if (v.cur === 't') { consider('ta', Math.abs(p.x - g.X(v.ta))); consider('tb', Math.abs(p.x - g.X(v.tb))); }
     if (v.cur === 'v') { consider('va', Math.abs(p.y - g.Y(v.va))); consider('vb', Math.abs(p.y - g.Y(v.vb))); }
     if (data.trigX != null && data.draggableTrig) { if (p.y < g.mt + 4) consider('tp', Math.abs(p.x - g.X(data.trigX / PXDIV))); if (data.trigManual && data.trigL != null) consider('tl', Math.abs(p.y - g.Y((data.trigL - 128) / PXDIV)) + (p.x > g.ml + g.pw - 30 ? -3 : 2)); }
-    if (!best) return;
+    if (!best) {
+      if (!data.pannable) return;
+      e.preventDefault(); const x0 = p.x, a0 = v.t0, b0 = v.t1, k = (b0 - a0) / g.pw, lo = data.range ? data.range[0] : 0, hi = data.range ? data.range[1] : 12; let moved = false;
+      cv.style.cursor = 'grabbing';
+      const mv = ev => { const dx = pick(ev).x - x0; if (Math.abs(dx) > 3) moved = true; let a = a0 - dx * k, b = b0 - dx * k; if (a < lo) { b += lo - a; a = lo; } if (b > hi) { a -= b - hi; b = hi; } v.t0 = a; v.t1 = b; onChange(); };
+      const up = ev => { cv.style.cursor = ''; removeEventListener('mousemove', mv); removeEventListener('mouseup', up); if (!moved && data.onClickDiv) data.onClickDiv(g.toDiv(pick(ev).x)); onChange(true); };
+      addEventListener('mousemove', mv); addEventListener('mouseup', up); return;
+    }
     v.drag = best; e.preventDefault();
     const mv = ev => {
       const q = pick(ev), dx = Math.max(data.range ? data.range[0] : 0, Math.min(data.range ? data.range[1] : 12, g.toDiv(q.x))), dy = Math.max(-4, Math.min(4, g.toDivY(q.y)));
@@ -570,13 +579,13 @@ addEventListener('keydown', e => { if (e.code === 'Space' && mode === 'live' && 
 function canvasPNG(cv) { const d = atob(cv.toDataURL('image/png').split(',')[1]); const u = new Uint8Array(d.length); for (let i = 0; i < d.length; i++) u[i] = d.charCodeAt(i); return u; }
 $('bShot').onclick = () => { if (liveKind === 'deep') { if (!deep.buf[0] && !deep.buf[1]) return toast('Нет полной записи'); return saveOut(`PUF_full_${stamp()}.png`, canvasPNG($('deepPlot'))); } if (liveKind === 'spec') return saveOut(`PUF_spectrum_${stamp()}.png`, canvasPNG($('specPlot'))); if (liveKind === 'tape') return saveOut(`PUF_tape_${stamp()}.png`, canvasPNG($('tapePlot'))); if (!proc) return toast('Нет данных'); saveOut(`PUF_${stamp()}.png`, canvasPNG($('livePlot'))); };
 function csvFrames(list, processed) {
-  const lines = [`﻿кадр;время, с;CH1, ${UN(0)};CH2, ${UN(1)};развёртка, с/дел;CH1 ${UN(0)}/дел;CH2 ${UN(1)}/дел`];
+  const lines = [`﻿кадр;время, с;CH1, ${UN(0)};CH2, ${UN(1)};развёртка, с/дел;CH1 ${UN(0)}/дел;CH2 ${UN(1)}/дел;от начала, с`];
   list.forEach((fr, k) => {
     const y = processed || fr.raw;
     for (let i = 0; i < N; i++) {
       const t = fr.tdiv ? (i - (processed && proc && proc.stOn ? S.st.pos : 150)) * fr.tdiv / PXDIV : i;
       const v = c => (fr.mask & (1 << c)) && !isNaN(y[c][i]) ? num((y[c][i] - zeroRaw(c)) / PXDIV * (fr.vdiv[c] || 1)) : '';
-      lines.push([k, num(t), v(0), v(1), i ? '' : num(fr.tdiv), i ? '' : num(fr.vdiv[0]), i ? '' : num(fr.vdiv[1])].join(';'));
+      lines.push([k, num(t), v(0), v(1), i ? '' : num(fr.tdiv), i ? '' : num(fr.vdiv[0]), i ? '' : num(fr.vdiv[1]), i ? '' : num((fr.t - list[0].t) / 1000, 6)].join(';'));
     }
   });
   return utf8(lines.join('\r\n'));
@@ -1244,49 +1253,103 @@ function parseCSV(text) {
   const col = re => head.findIndex(h => re.test(h));
   if (col(/частота|freq/) === 0 && col(/скз|rms|ампл/) >= 0) throw new Error('это CSV спектра — откройте его в Excel');
   let ct = col(/врем|time|^t\b|^t,/), c1 = col(/ch1|кан.*1|канал 1|^u1|^v1/), c2 = col(/ch2|кан.*2|канал 2|^u2|^v2/), cf = col(/кадр|frame/), cg = col(/разрыв|gap/);
+  const cft = col(/от триггера|от начала/), ctd = col(/развёртка/), cv1 = col(/ch1.*\/дел/), cv2 = col(/ch2.*\/дел/);   // per-frame time and the device scales (first row of a frame)
   if (ct < 0) ct = 0; if (c1 < 0 && c2 < 0) { c1 = ct === 0 ? 1 : 0; c2 = head.length > 2 ? (ct === 0 ? 2 : 1) : -1; }
   const num = v => { if (v == null) return NaN; v = v.trim(); if (!v) return NaN; if (delim !== ',') v = v.replace(',', '.'); return parseFloat(v); };
   const frames = []; let cur = null, lastF = null;
   for (let k = 1; k < lines.length; k++) {
     const p = lines[k].split(delim), t = num(p[ct]); if (!isFinite(t)) continue;
     const f = cf >= 0 ? p[cf].trim() : '0';
-    if (!cur || f !== lastF) { cur = { t: [], v: [[], []], gap: [] }; frames.push(cur); lastF = f; }
+    if (!cur || f !== lastF) { cur = { t: [], v: [[], []], gap: [], ft: null, tdivF: null, vdivF: [null, null] }; frames.push(cur); lastF = f; }
+    const first = (ci, set) => { if (ci >= 0) { const x = num(p[ci]); if (isFinite(x) && x > -1e12) set(x); } };
+    if (cur.ft == null) first(cft, x => cur.ft = x); if (cur.tdivF == null) first(ctd, x => { if (x > 0) cur.tdivF = x; }); if (cur.vdivF[0] == null) first(cv1, x => { if (x > 0) cur.vdivF[0] = x; }); if (cur.vdivF[1] == null) first(cv2, x => { if (x > 0) cur.vdivF[1] = x; });
     cur.t.push(t); cur.v[0].push(c1 >= 0 ? num(p[c1]) : NaN); cur.v[1].push(c2 >= 0 ? num(p[c2]) : NaN); cur.gap.push(cg >= 0 && p[cg] && p[cg].trim() === '1' ? 1 : 0);
   }
   if (!frames.length) throw new Error('не нашёл столбцов с числами');
   for (const fr of frames) { fr.t = Float64Array.from(fr.t); fr.v = fr.v.map(a => Float32Array.from(a)); fr.on = fr.v.map(a => a.some(x => isFinite(x))); }
-  return { frames, cols: { t: head[ct], c1: c1 >= 0 ? head[c1] : null, c2: c2 >= 0 ? head[c2] : null } };
+  return { frames, ftKind: cft >= 0 ? (/триггер/.test(head[cft]) ? 'trig' : 'start') : null, cols: { t: head[ct], c1: c1 >= 0 ? head[c1] : null, c2: c2 >= 0 ? head[c2] : null } };
 }
 const nice125 = x => { if (!(x > 0)) return 1; const e = Math.pow(10, Math.floor(Math.log10(x))), m = x / e; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * e; };
+// ---- multi-frame recordings: one scale for the whole record, frame / film strip / overlay views, player ----
+function csvPrep(C) {
+  C.stats = C.frames.map(fr => [0, 1].map(c => { let a = Infinity, b = -Infinity, s2 = 0, n = 0; for (const x of fr.v[c]) if (isFinite(x)) { if (x < a) a = x; if (x > b) b = x; s2 += x * x; n++; } return n ? { min: a, max: b, rms: Math.sqrt(s2 / n) } : null; }));
+  C.vauto = [0, 1].map(c => { let m = 0; for (const s of C.stats) if (s[c]) m = Math.max(m, Math.abs(s[c].min), Math.abs(s[c].max)); return nice125(m / 3.6 || 1); });
+  const f0 = C.frames[0]; C.tauto = nice125(((f0.t[f0.t.length - 1] - f0.t[0]) || 1e-3) / 12);
+  C.hasT = C.frames.length > 1 && C.frames.every(f => f.ft != null);
+  C.ftime = C.frames.map((f, k) => C.hasT ? f.ft : k / 30);   // without timestamps assume ~30 frames/s
+}
+const fPos = () => fileData && fileData.csv ? Math.min(fileData.csv.frames.length - 1, Math.max(0, fOver.frame || 0)) : 0;
+let fMode = 'frame';
+function csvScales(fr) {
+  const C = fileData.csv;
+  return { tdiv: fOver.tdiv || fr.tdivF || C.tauto, vdiv: [0, 1].map(c => fOver['vdiv' + c] || fr.vdivF[c] || C.vauto[c]), z: [0, 1].map(c => fOver['zdiv' + c] || 0) };
+}
+const relT = (C, k) => { const t = C.ftime[k]; return C.hasT ? (t > 1e-9 ? '+' : t < -1e-9 ? '−' : '') + si(Math.abs(t), 'с', 3).replace(/^0 с$/, '0 с') : ''; };
 function csvView() {
-  const C = fileData.csv, fr = C.frames[Math.min(C.frames.length - 1, fOver.frame || 0)], n = fr.t.length;
+  if (fMode === 'strip' && fileData.csv.frames.length > 1) return csvStrip();
+  const d = csvFrameData(fPos());
+  if (fMode === 'over' && fileData.csv.frames.length > 1) d.persist = csvOverlay(d);
+  return d;
+}
+function csvOverlay(d) {   // every frame (≤150, evenly) in the same scale and time grid as the current one
+  const C = fileData.csv, sc = csvScales(C.frames[fPos()]), key = [sc.tdiv, sc.vdiv, sc.z, d.n].join('|');
+  if (C.over && C.over.key === key) return C.over.list;
+  const step = Math.max(1, Math.ceil(C.frames.length / 150)), list = [];
+  for (let k = 0; k < C.frames.length; k += step) {
+    const fr = C.frames[k]; if (fr.t.length !== d.n) continue;
+    list.push([0, 1].map(c => { const a = new Float32Array(d.n); for (let i = 0; i < d.n; i++) a[i] = isFinite(fr.v[c][i]) ? 128 + (fr.v[c][i] / sc.vdiv[c] + sc.z[c]) * PXDIV : NaN; return a; }));
+  }
+  C.over = { key, list }; return list;
+}
+function csvStrip() {   // all frames side by side, like a film strip
+  const C = fileData.csv, F = C.frames, k0 = fPos(), sc = csvScales(F[k0]), key = [sc.tdiv, sc.vdiv, sc.z].join('|');
+  if (!C.strip || C.strip.key !== key) {
+    const w = F.map(fr => Math.max(0.5, (fr.t[fr.t.length - 1] - fr.t[0]) / sc.tdiv)), pitch = Math.max(...w) + 0.8;
+    let total = 0; for (const fr of F) total += fr.t.length + 1;
+    const xs = new Float32Array(total), y = [new Float32Array(total), new Float32Array(total)], seps = []; let j = 0;
+    F.forEach((fr, k) => {
+      const off = k * pitch; if (k) seps.push(off - 0.4);
+      for (let i = 0; i < fr.t.length; i++, j++) { xs[j] = off + (fr.t[i] - fr.t[0]) / sc.tdiv; /* divisions */ for (const c of [0, 1]) y[c][j] = isFinite(fr.v[c][i]) ? 128 + (fr.v[c][i] / sc.vdiv[c] + sc.z[c]) * PXDIV : NaN; }
+      xs[j] = off + w[k] + 0.4; y[0][j] = y[1][j] = NaN; j++;   // break the line between frames
+    });
+    for (let i = 0; i < total; i++) xs[i] *= PXDIV;   // drawScope expects xs in screen samples (25 per division)
+    C.strip = { key, xs, y, seps, pitch, w };
+  }
+  const S_ = C.strip, range = [0, F.length * S_.pitch], v = getView('filePlot'); v.range0 = range[1];
+  if (fileData.stripFresh) { v.t0 = Math.max(0, k0 * S_.pitch - S_.pitch); v.t1 = Math.min(range[1], v.t0 + 3 * S_.pitch); fileData.stripFresh = false; }
+  const kOf = d => Math.max(0, Math.min(F.length - 1, Math.floor(d / S_.pitch)));
+  const fd = csvFrameData(k0, true);
+  return { n: S_.xs.length, y: S_.y, xs: [S_.xs, S_.xs], range, on: [0, 1].map(c => F.some(f => f.on[c])), v0: fd.v0, vdiv: sc.vdiv, tdiv: sc.tdiv, trigX: null, trigL: null, draggableTrig: false,
+    seps: S_.seps, hl: [k0 * S_.pitch - 0.2, k0 * S_.pitch + S_.w[k0] + 0.2], pannable: true, onClickDiv: d => setFrame(kOf(d)),
+    xfmt: (d, long) => { const k = kOf(d); return long ? `кадр ${k + 1}` + (C.hasT ? ' · ' + relT(C, k) : '') + ' · t = ' + si((d - k * S_.pitch) * sc.tdiv, 'с', 3) + ' в кадре' : `к.${k + 1}` + (C.hasT ? ' ' + relT(C, k) : ''); },
+    onZero: fd.onZero, _b: fd._b, csvFrame: fd.csvFrame, measData: fd };
+}
+function csvFrameData(k, noView) {
+  const C = fileData.csv, fr = C.frames[k], n = fr.t.length;
   let t0 = Infinity, t1 = -Infinity; for (const t of fr.t) { if (t < t0) t0 = t; if (t > t1) t1 = t; }
   const span = t1 - t0 || 1e-3;
-  const tdiv = fOver.tdiv || nice125(span / 12);
+  const { tdiv, vdiv, z } = csvScales(fr);
   const dtS = tdiv / PXDIV;
-  const vdiv = [0, 1].map(c => { if (fOver['vdiv' + c]) return fOver['vdiv' + c]; let m = 0; for (const v of fr.v[c]) if (isFinite(v)) m = Math.max(m, Math.abs(v)); return nice125(m / 3.6 || 1); });
-  const z = [0, 1].map(c => fOver['zdiv' + c] || 0);
   const y = [0, 1].map(c => { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = isFinite(fr.v[c][i]) ? 128 + (fr.v[c][i] / vdiv[c] + z[c]) * PXDIV : NaN; return a; });
   const xs = [0, 1].map(() => { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = (fr.t[i] - t0) / dtS; return a; });
   const range = [0, Math.max(0.5, span / tdiv)];
   const v = getView('filePlot');
-  if (fileData.csvFresh) { v.t0 = 0; v.t1 = range[1]; fileData.csvFresh = false; }
-  v.t0 = Math.max(0, Math.min(v.t0, range[1] - 0.5)); v.t1 = Math.min(range[1], Math.max(v.t1, v.t0 + 0.5));
+  if (!noView) {   // the film strip computes the current frame only for its measurements — its zoom must stay
+    if (fileData.csvFresh || v.range0 !== range[1]) { v.t0 = 0; v.t1 = range[1]; v.range0 = range[1]; fileData.csvFresh = false; }
+    v.t0 = Math.max(0, Math.min(v.t0, range[1] - 0.5)); v.t1 = Math.min(range[1], Math.max(v.t1, v.t0 + 0.5));
+  }
   const b = { n, t: fr.t, chans: [0, 1].map(c => ({ on: fr.on[c], volts: fr.v[c] })) };
   return { n, y, xs, range, on: fr.on, v0: [128 + z[0] * PXDIV, 128 + z[1] * PXDIV], vdiv, tdiv, trigX: t0 <= 0 && t1 >= 0 ? -t0 / dtS : 0, trigL: null, draggableTrig: false,
     onZero: (c, d) => { fOver['zdiv' + c] = d; }, _b: b, csvFrame: fr };
 }
 async function openRec(it) {
   sel = it; fOver = {}; ['fTdiv', 'fV0', 'fV1'].forEach(id => $(id).value = '');
-  renderFileList();
-  $('fFrameRow').hidden = true;
+  renderFileList(); plStop();
+  $('fPlayer').hidden = $('fOverWrap').hidden = true;
   if (it.csv) {
     try {
       const buf = await readItem(it, 'csv');
-      const csv = parseCSV(new TextDecoder('utf-8').decode(buf));
-      fileData = { it, csv, csvFresh: true, warn: [], shot: { ch: [{}, {}] }, shotURL: null };
-      if (csv.frames.length > 1) { $('fFrameRow').hidden = false; $('fFrame').max = csv.frames.length - 1; $('fFrame').value = 0; $('fFrameTxt').textContent = `1 из ${csv.frames.length}`; }
-      segClick('fView', 'plot'); drawFile();
+      showCsv(it, parseCSV(new TextDecoder('utf-8').decode(buf)));
     } catch (e) { toast('CSV не открылся: ' + e.message); }
     return;
   }
@@ -1303,6 +1366,16 @@ async function openRec(it) {
     if (!bin && fileData.shotURL) segClick('fView', 'shot');
     drawFile();
   } catch (e) { toast('Не удалось открыть: ' + e.message); }
+}
+function showCsv(it, csv) {
+  csvPrep(csv);
+  fileData = { it, csv, csvFresh: true, stripFresh: true, warn: [], shot: { ch: [{}, {}] }, shotURL: null };
+  if (csv.frames.length > 1) {
+    $('fPlayer').hidden = $('fOverWrap').hidden = false;
+    if (csv.ftKind === 'trig') { const k = csv.ftime.findIndex(t => t >= 0); fOver.frame = k > 0 ? k : 0; }   // event: start at the trigger
+    fMode = 'frame'; segSet('pMode', 'frame');
+  }
+  segClick('fView', 'plot'); drawFile();
 }
 function segClick(id, v) { const b = $(id).querySelector(`[data-v="${v}"]`); b && b.click(); }
 function fileView() {
@@ -1324,7 +1397,6 @@ segInit('fCur', v => { getView('filePlot').cur = v; drawFile(); });
 $('fTdiv').onchange = e => { fOver.tdiv = e.target.value ? +e.target.value : undefined; drawFile(); };
 $('fV0').onchange = e => { fOver.vdiv0 = e.target.value ? +e.target.value : undefined; drawFile(); };
 $('fV1').onchange = e => { fOver.vdiv1 = e.target.value ? +e.target.value : undefined; drawFile(); };
-$('fFrame').oninput = e => { fOver.frame = +e.target.value; $('fFrameTxt').textContent = `${fOver.frame + 1} из ${fileData.csv.frames.length}`; drawFile(); };
 function drawFile() {
   const data = fileView(), cv = $('filePlot');
   $('fileEmpty').style.display = fileData ? 'none' : 'flex';
@@ -1334,7 +1406,7 @@ function drawFile() {
   const sh = fileData && fileData.shot;
   $('fileChips').innerHTML = fileData && fileData.csv ? [
     `<span class="chip"><b>${esc(fileData.it.name)}</b></span>`,
-    `<span class="chip">${data.n.toLocaleString('ru-RU')} точек · ${fmtT(data.csvFrame.t[data.n - 1] - data.csvFrame.t[0])}</span>`,
+    (d => `<span class="chip">${d.n.toLocaleString('ru-RU')} точек · ${fmtT(d.csvFrame.t[d.n - 1] - d.csvFrame.t[0])}</span>`)(data.measData || data),
     data.on[0] ? `<span class="chip c1">CH1 <b>${vdivNameC(0, data.vdiv[0])}</b></span>` : '',
     data.on[1] ? `<span class="chip c2">CH2 <b>${vdivNameC(1, data.vdiv[1])}</b></span>` : '',
   ].join('') : fileData ? [
@@ -1343,16 +1415,106 @@ function drawFile() {
     data && data.on[0] ? `<span class="chip c1">CH1 <b>${data.vdiv[0] ? vdivNameC(0, data.vdiv[0]) : '?'}</b>${sh.ch[0].coupling ? ' · ' + sh.ch[0].coupling : ''}${sh.ch[0].probe ? ' · ' + sh.ch[0].probe : ''}</span>` : '',
     data && data.on[1] ? `<span class="chip c2">CH2 <b>${data.vdiv[1] ? vdivNameC(1, data.vdiv[1]) : '?'}</b>${sh.ch[1].coupling ? ' · ' + sh.ch[1].coupling : ''}${sh.ch[1].probe ? ' · ' + sh.ch[1].probe : ''}</span>` : '',
   ].join('') : '';
-  $('fileMeas').innerHTML = data ? measHTML(data) : '';
+  $('fileMeas').innerHTML = data ? measHTML(data.measData || data) : '';
+  if (fileData && fileData.csv && fileData.csv.frames.length > 1) { drawOverview(); playerText(); }
   $('fWarn').textContent = fileData ? fileData.warn.join(' · ') : '';
   $('fCurOut').innerHTML = cursorText(getView('filePlot'), data);
 }
+function playerText() {
+  const C = fileData.csv, k = fPos(), n = C.frames.length;
+  const rel = C.hasT ? relT(C, k) + (C.ftKind === 'trig' ? ' от срабатывания' : '') : '';
+  const dur = C.hasT ? ' · из ' + durText(C.ftime[n - 1] - C.ftime[0]) : '';
+  $('pTxt').textContent = `кадр ${k + 1} / ${n}` + (rel ? ' · ' + rel : '') + dur;
+  $('pTxt').title = $('pTxt').textContent;
+  $('pPlay').textContent = PL.on ? '⏸' : '▶'; $('pPlay').classList.toggle('on', PL.on);
+}
+function setFrame(k, fromPlayer) {
+  const C = fileData && fileData.csv; if (!C) return;
+  if (!fromPlayer) plStop();
+  fOver.frame = Math.max(0, Math.min(C.frames.length - 1, Math.round(k)));
+  if (fMode === 'strip' && C.strip) {   // keep the current frame in view
+    const v = getView('filePlot'), a = fOver.frame * C.strip.pitch, b = a + C.strip.w[fOver.frame], span = v.t1 - v.t0;
+    if (a < v.t0 || b > v.t1) { let t0 = (a + b) / 2 - span / 2; t0 = Math.max(0, Math.min(C.frames.length * C.strip.pitch - span, t0)); v.t0 = t0; v.t1 = t0 + span; }
+  }
+  drawFileSoon();
+}
+// player: frames follow their recorded timestamps (a long pause is shortened to 1 s)
+const PL = { on: false, last: 0, acc: 0 };
+function plStop() { if (PL.on) { PL.on = false; if (fileData && fileData.csv) playerText(); } }
+function plStart() {
+  const C = fileData && fileData.csv; if (!C || C.frames.length < 2) return;
+  if (fPos() >= C.frames.length - 1) fOver.frame = 0;
+  PL.on = true; PL.last = performance.now(); PL.acc = 0; playerText(); requestAnimationFrame(plTick);
+}
+function plTick(ts) {
+  if (!PL.on || !fileData || !fileData.csv) return;
+  const C = fileData.csv, n = C.frames.length, sp = +$('pSpeed').value || 1;
+  PL.acc += Math.max(0, ts - PL.last) / 1000 * sp; PL.last = ts;
+  let k = fPos();
+  while (k < n - 1) { const d = Math.min(1, Math.max(0.001, C.ftime[k + 1] - C.ftime[k])); if (PL.acc < d) break; PL.acc -= d; k++; }
+  if (k !== fPos()) setFrame(k, true);
+  if (k >= n - 1) { PL.on = false; playerText(); return; }
+  requestAnimationFrame(plTick);
+}
+$('pPlay').onclick = () => PL.on ? plStop() : plStart();
+$('pPrev').onclick = () => setFrame(fPos() - 1); $('pNext').onclick = () => setFrame(fPos() + 1);
+$('pFirst').onclick = () => setFrame(0); $('pLast').onclick = () => setFrame(1e9);
+segInit('pMode', v => { fMode = v; if (fileData) { fileData.stripFresh = true; fileData.csvFresh = true; } drawFile(); });
+addEventListener('keydown', e => {
+  if (mode !== 'files' || !fileData || !fileData.csv || fileData.csv.frames.length < 2 || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  const k = fPos(), step = e.shiftKey ? 10 : 1;
+  if (e.code === 'ArrowRight') { e.preventDefault(); setFrame(k + step); }
+  else if (e.code === 'ArrowLeft') { e.preventDefault(); setFrame(k - step); }
+  else if (e.code === 'Space') { e.preventDefault(); PL.on ? plStop() : plStart(); }
+  else if (e.code === 'Home') { e.preventDefault(); setFrame(0); }
+  else if (e.code === 'End') { e.preventDefault(); setFrame(1e9); }
+});
+// overview: the whole record — envelope of every frame per channel, the current frame, the trigger (t = 0)
+function ovGeom() { const cv = $('fOverview'), W = cv.clientWidth; return { ml: 8, mr: 8, W }; }
+function ovX(C, k, G) { const t0 = C.ftime[0], t1 = C.ftime[C.frames.length - 1] || 1; return G.ml + (C.ftime[k] - t0) / ((t1 - t0) || 1) * (G.W - G.ml - G.mr); }
+function ovFrameAt(C, px) {
+  const G = ovGeom(), t0 = C.ftime[0], t1 = C.ftime[C.frames.length - 1], t = t0 + (px - G.ml) / ((G.W - G.ml - G.mr) || 1) * (t1 - t0);
+  let lo = 0, hi = C.frames.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (C.ftime[m] < t) lo = m; else hi = m; }
+  return Math.abs(C.ftime[lo] - t) <= Math.abs(C.ftime[hi] - t) ? lo : hi;
+}
+function drawOverview() {
+  const C = fileData.csv, c = canvasCtx($('fOverview')); if (!c) return;
+  const { x, W, H } = c, G = ovGeom(), n = C.frames.length, col = [cssVar('--ch1'), cssVar('--ch2')], top = 6, bot = H - 16;
+  x.fillStyle = cssVar('--scr'); x.fillRect(0, 0, W, H);
+  for (const ch of [1, 0]) {
+    let lo = Infinity, hi = -Infinity; for (const s of C.stats) if (s[ch]) { lo = Math.min(lo, s[ch].min); hi = Math.max(hi, s[ch].max); }
+    if (!(hi > lo)) continue;
+    const Y = v => bot - (v - lo) / (hi - lo) * (bot - top);
+    x.strokeStyle = col[ch]; x.globalAlpha = .75; x.lineWidth = Math.max(1, Math.min(4, (W - G.ml - G.mr) / n * 0.8)); x.beginPath();
+    C.stats.forEach((s, k) => { if (!s[ch]) return; const px = Math.round(ovX(C, k, G)) + .5; x.moveTo(px, Y(s[ch].min)); x.lineTo(px, Y(s[ch].max) - 0.5); });
+    x.stroke(); x.globalAlpha = 1;
+  }
+  if (C.hasT && C.ftime[0] < 0 && C.ftime[n - 1] > 0) {   // trigger moment
+    const t0 = C.ftime[0], t1 = C.ftime[n - 1], px = G.ml - t0 / (t1 - t0) * (W - G.ml - G.mr);
+    x.strokeStyle = cssVar('--orange'); x.setLineDash([3, 3]); x.beginPath(); x.moveTo(px, 2); x.lineTo(px, bot); x.stroke(); x.setLineDash([]);
+  }
+  const px = ovX(C, fPos(), G); x.fillStyle = 'rgba(255,255,255,.12)'; x.fillRect(px - 4, 0, 8, bot + 2); x.strokeStyle = '#fff'; x.lineWidth = 2; x.beginPath(); x.moveTo(px, 0); x.lineTo(px, bot + 2); x.stroke();
+  x.fillStyle = '#86A9B3'; x.font = '10.5px Inter, sans-serif'; x.textBaseline = 'bottom';
+  const lab = k => C.hasT ? relT(C, k) : 'кадр ' + (k + 1);
+  x.textAlign = 'left'; x.fillText(lab(0), G.ml, H - 2); x.textAlign = 'right'; x.fillText(lab(n - 1), W - G.mr, H - 2);
+  if (C.hasT && C.ftime[0] < 0 && C.ftime[n - 1] > 0) { x.textAlign = 'center'; x.fillStyle = cssVar('--orange'); x.fillText('срабатывание', G.ml - C.ftime[0] / (C.ftime[n - 1] - C.ftime[0]) * (W - G.ml - G.mr), H - 2); }
+}
+(() => {
+  const cv = $('fOverview'), at = e => e.clientX - cv.getBoundingClientRect().left;
+  cv.addEventListener('mousedown', e => {
+    const C = fileData && fileData.csv; if (!C) return; e.preventDefault(); setFrame(ovFrameAt(C, at(e)));
+    const mv = ev => setFrame(ovFrameAt(C, at(ev))), up = () => { removeEventListener('mousemove', mv); removeEventListener('mouseup', up); };
+    addEventListener('mousemove', mv); addEventListener('mouseup', up);
+  });
+  cv.addEventListener('wheel', e => { if (!fileData || !fileData.csv) return; e.preventDefault(); setFrame(fPos() + (e.deltaY > 0 ? 1 : -1) * (e.shiftKey ? 10 : 1)); }, { passive: false });
+})();
 let fileRaf = 0; const drawFileSoon = () => { if (!fileRaf) fileRaf = requestAnimationFrame(() => { fileRaf = 0; drawFile(); }); };   // mousemove over a long CSV used to recompute everything per event
 attachPlotMouse($('filePlot'), fileView, drawFileSoon);
 hoverable($('filePlot'), drawFileSoon);
 $('fPng').onclick = () => { if (!fileData) return; saveOut(`PUF_${fileData.it.name}.png`, canvasPNG($('filePlot'))); };
 $('fCsv').onclick = () => {
   const d = fileView(); if (!d) return toast('Нет данных .bin');
+  if (fileData.ev) return recSave(fileData.ev);
   if (fileData.csv) return toast('Это уже CSV-файл');
   const b = d._b, lines = [`﻿время, с;CH1, ${UN(0)};CH2, ${UN(1)}`];
   for (let i = 0; i < b.n; i++) lines.push([num(b.t[i]), b.chans[0].on ? num(b.chans[0].volts[i] * KS(0)) : '', b.chans[1].on ? num(b.chans[1].volts[i] * KS(1)) : ''].join(';'));
@@ -1870,9 +2032,20 @@ function recUI() {
     const d = document.createElement('div'); d.className = 'ev' + (e === REC.sel ? ' on' : '');
     const dur = e.frames.length ? e.frames[e.frames.length - 1].t - e.frames[0].t : 0;
     d.innerHTML = `<b>№${e.n}</b><span>${new Date(e.wall).toLocaleTimeString('ru-RU')}</span><b>${esc(recName(e.id))}</b>${e.marks.length > 1 ? `<span>+${e.marks.length - 1} сраб.</span>` : ''}<i class="sp"></i>${e.done ? '' : '<i class="live">идёт запись</i>'}<span>${durText(dur)} · ${e.frames.length.toLocaleString('ru-RU')} кадр.${e.cut ? ' (обрезано)' : ''}</span>`;
+    if (e.done && e.frames.length > 1) { const b = document.createElement('button'); b.className = 'tbtn'; b.textContent = '▶ Смотреть'; b.title = 'Открыть событие в плеере («Записи»): воспроизведение, лента кадров, наложение'; b.onclick = ev => { ev.stopPropagation(); recOpenInFiles(e); }; d.append(b); }
     d.onclick = () => { REC.sel = e; REC.pos = null; REC.follow = !e.done; recUI(); needDraw = true; };
     l.append(d);
   }
+}
+function recOpenInFiles(ev) {   // the event as a multi-frame record, without saving a file
+  const frames = ev.frames.map(({ fr, m, t }) => {
+    const tt = new Float64Array(N); for (let i = 0; i < N; i++) tt[i] = fr.tdiv ? (i - 150) * fr.tdiv / PXDIV : i;
+    const v = [0, 1].map(c => { const a = new Float32Array(N); for (let i = 0; i < N; i++) a[i] = fr.mask & (1 << c) ? (fr.raw[c][i] - m.z[c]) / PXDIV * (fr.vdiv[c] || 1) : NaN; return a; });
+    return { t: tt, v, gap: [], on: [0, 1].map(c => !!(fr.mask & (1 << c))), ft: t - ev.tTrig, tdivF: fr.tdiv, vdivF: [fr.vdiv[0], fr.vdiv[1]] };
+  });
+  setMode('files'); sel = null; fOver = {}; plStop(); renderFileList();
+  showCsv({ name: `Событие №${ev.n} · ${recName(ev.id)}`, key: 'event:' + ev.n }, { frames, ftKind: 'trig', cols: {} });
+  fileData.ev = ev;   // «CSV» saves the event itself
 }
 function buildRecTriggers() {
   const box = $('rcTrig'); box.innerHTML = '';
@@ -1925,6 +2098,12 @@ function recInit() {
   $('rcStop').onclick = () => { if (REC.ev) recFinish(); else { REC.armed = false; recUI(); } };
   $('rcSave').onclick = () => recSave(REC.sel);
   $('rcPos').oninput = e => { REC.pos = +e.target.value; REC.follow = false; needDraw = true; };
+  (() => {   // click or drag on the trend chooses the frame (same x mapping as drawTrendChart: 58 px margins)
+    const cv = $('rcChart');
+    const pick = e => { const ev = REC.sel; if (!ev || !ev.frames.length) return; const r = cv.getBoundingClientRect(), L = ev.frames, t0 = L[0].t, t1 = L[L.length - 1].t, t = t0 + (e.clientX - r.left - 58) / ((r.width - 116) || 1) * (t1 - t0); let k = 0; while (k < L.length - 1 && L[k + 1].t <= t) k++; if (k < L.length - 1 && t - L[k].t > L[k + 1].t - t) k++; REC.pos = k; REC.follow = false; needDraw = true; };
+    cv.style.cursor = 'pointer';
+    cv.addEventListener('mousedown', e => { pick(e); const mv = ev => pick(ev), up = () => { removeEventListener('mousemove', mv); removeEventListener('mouseup', up); }; addEventListener('mousemove', mv); addEventListener('mouseup', up); });
+  })();
   recUI();
 }
 

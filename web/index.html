@@ -27,7 +27,7 @@
   <div class="conn" id="conn" title="Состояние связи"><i class="dot"></i><span id="connText">поиск прибора…</span></div>
   <button class="ibtn" id="bPort" title="Выбор порта"><svg viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0zM12 17v4"/></svg></button>
   <button class="ibtn" id="bTheme" title="Светлая / тёмная тема"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg></button>
-  <span class="ver" id="ver">v1.5.3</span>
+  <span class="ver" id="ver">v1.6.0</span>
 </header>
 
 <div class="body">
@@ -432,6 +432,19 @@
             <div class="plotwrap" id="filePlotWrap"><canvas id="filePlot"></canvas><img id="fileShot" hidden alt="">
               <div class="empty" id="fileEmpty"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg><b>Выберите осциллограмму</b><span>Подключите прибор в режиме «USB Sharing» — записи найдутся сами. Или откройте файлы .bin (данные) и .bmp (снимок) вручную.</span></div>
             </div>
+            <div class="player" id="fPlayer" hidden>
+              <div class="pbtns">
+                <button class="tbtn" id="pFirst" title="В начало (Home)">⏮</button>
+                <button class="tbtn" id="pPrev" title="Предыдущий кадр (←, Shift+← — на 10)">◀</button>
+                <button class="tbtn pplay" id="pPlay" title="Воспроизвести / пауза (Пробел)">▶</button>
+                <button class="tbtn" id="pNext" title="Следующий кадр (→, Shift+→ — на 10)">▶</button>
+                <button class="tbtn" id="pLast" title="В конец (End)">⏭</button>
+                <select id="pSpeed" title="Скорость воспроизведения"><option value="0.25">×0,25</option><option value="0.5">×0,5</option><option value="1" selected>×1</option><option value="2">×2</option><option value="4">×4</option></select>
+              </div>
+              <span class="ptxt" id="pTxt">—</span>
+              <div class="seg sm" id="pMode"><button data-v="frame" class="on" title="Один кадр крупно">Кадр</button><button data-v="strip" title="Все кадры подряд, как плёнка: колесо — масштаб, перетаскивание — прокрутка, щелчок — выбрать кадр">Лента кадров</button><button data-v="over" title="Все кадры наложены друг на друга — видно разброс и дрожание">Наложение</button></div>
+            </div>
+            <div class="overview" id="fOverWrap" hidden title="Вся запись: щелчок или протягивание — перейти к моменту, колесо — по кадрам"><canvas id="fOverview"></canvas></div>
             <div class="meas" id="fileMeas"></div>
           </div>
           <div class="card">
@@ -442,7 +455,6 @@
               <label><i class="sq c2"></i>CH2, В/дел<select id="fV1"></select></label>
               <div class="seg sm" id="fCur"><button data-v="off" class="on">без курсоров</button><button data-v="t">время</button><button data-v="v">напряжение</button></div>
             </div>
-            <div class="row" id="fFrameRow" hidden><span>Кадр записи</span><input type="range" id="fFrame" min="0" max="0" value="0"><span class="u" id="fFrameTxt"></span></div>
             <div class="cur" id="fCurOut"></div>
           </div>
         </div>
@@ -453,7 +465,7 @@
     <section class="view" id="v-about">
       <div class="card about">
         <svg class="logo big" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="var(--teal)"/><path d="M5 18h4l3-9 4 15 3-11 2 5h6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="26" cy="18" r="2.2" fill="var(--orange)"/></svg>
-        <h2>PUFService <span class="ver" id="ver2">v1.5.3</span></h2>
+        <h2>PUFService <span class="ver" id="ver2">v1.6.0</span></h2>
         <p>Программа для работы с осциллографом FNIRSI 2C53T с доработанной прошивкой <b>RU_USB4</b>: просмотр сигнала в реальном времени, программная стабилизация, удалённое управление кнопками и просмотр сохранённых осциллограмм.</p>
         <ul>
           <li>Онлайн-режим работает, когда прибор подключён кабелем и находится в режиме осциллографа.</li>
