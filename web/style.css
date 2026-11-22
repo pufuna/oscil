@@ -319,3 +319,17 @@ select { cursor: pointer; }
 .ev span { color: var(--muted); font-size: 12px; }
 .ev .live { color: var(--orange); font-weight: 600; }
 .ev .sp { flex: 1; }
+
+/* analyzer */
+.htab { margin-top: 12px; overflow-x: auto; }
+.htab table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.htab th { text-align: right; font-weight: 500; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.htab td { text-align: right; padding: 3px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.htab th:first-child, .htab td:first-child { text-align: left; }
+.htab tr.bad td { color: var(--orange); font-weight: 600; }
+.htab tr.f1 td { font-weight: 600; }
+/* self-update */
+.upd { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.updtok { margin-top: 10px; }
+.updtok summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.ver.new { background: var(--orange); color: #fff; cursor: pointer; }

@@ -20,7 +20,10 @@ import (
 )
 
 const AppName = "PUFService"
-const AppVersion = "1.4.0"
+
+// var (not const) so a test build can override it: -ldflags "-X main.AppVersion=…"
+var AppVersion = "1.5.0"
+
 const AppID = "pufservice"
 const FixedPort = 53153
 
@@ -503,6 +506,15 @@ func saveFile(w http.ResponseWriter, r *http.Request) {
 func main() {
 	sim := len(os.Args) > 1 && os.Args[1] == "--sim"
 	noWindow := len(os.Args) > 1 && (os.Args[len(os.Args)-1] == "--nowindow")
+	updated := false // started by the previous version right after a self-update
+	for _, a := range os.Args[1:] {
+		if a == "--updated" {
+			updated = true
+		}
+	}
+	if updated {
+		go cleanupOld()
+	}
 
 	// single instance: if our app already listens on the fixed port, just open another window
 	if c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", FixedPort), 300*time.Millisecond); err == nil {
@@ -518,6 +530,10 @@ func main() {
 		}
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", FixedPort))
+	for i := 0; err != nil && updated && i < 30; i++ { // the old version may still be releasing the port
+		time.Sleep(100 * time.Millisecond)
+		ln, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", FixedPort))
+	}
 	if err != nil {
 		ln, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -593,14 +609,23 @@ func main() {
 		go func() { time.Sleep(200 * time.Millisecond); os.Exit(0) }()
 	})
 
-	srv := &http.Server{Handler: guard(ln.Addr().(*net.TCPAddr).Port, mux), ReadHeaderTimeout: 10 * time.Second}
+	mux.HandleFunc("/api/update/check", updateCheck)
+	mux.HandleFunc("/api/update/apply", updateApply)
+	mux.HandleFunc("/api/update/token", updateToken)
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	srv := &http.Server{Handler: guard(port, mux), ReadHeaderTimeout: 10 * time.Second}
+	httpSrv = srv
 	go srv.Serve(ln)
 
 	if noWindow {
 		fmt.Println("listening on", url)
 		select {}
 	}
-	exited := openWindow(url)
+	var exited <-chan struct{}
+	if !updated || port != FixedPort { // after an update the old window reloads itself from the same address
+		exited = openWindow(url)
+	}
 	// exit when the window is gone: browser process ended AND no page connected for a while
 	for {
 		time.Sleep(2 * time.Second)
@@ -618,7 +643,7 @@ func main() {
 		if ever && n == 0 && time.Since(last) > 6*time.Second && procGone {
 			os.Exit(0)
 		}
-		if !ever && procGone && exited != nil {
+		if !ever && procGone && (exited != nil || updated) {
 			// window process ended before page ever connected (handoff) – wait longer for a client
 			time.Sleep(20 * time.Second)
 			hub.mu.Lock()

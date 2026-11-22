@@ -149,7 +149,8 @@ func (s *simPort) frame() []byte {
 		val := func(t float64, nzv float64) float64 {
 			var v float64
 			if c == 0 {
-				v = 2.0 * math.Sin(2*math.Pi*50*t+s.phase)
+				w := 2*math.Pi*50*t + s.phase // grid with typical harmonics: 3rd 1.5 %, 5th 4 %, 7th 3 % (THD ≈ 5.2 %)
+				v = 2.0 * (math.Sin(w) + 0.015*math.Sin(3*w) + 0.04*math.Sin(5*w) + 0.03*math.Sin(7*w))
 				if roll {
 					v = 2.0*math.Sin(2*math.Pi*0.3*t) + 0.6*math.Sin(2*math.Pi*2.1*t)
 				}

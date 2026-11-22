@@ -539,7 +539,7 @@ function drawLive() {
     $('scanInfo').textContent = 'частота опроса кнопок: ' + (scanRate ? Math.round(scanRate) + ' раз/с — короткое ≈ ' + Math.round(S.holdShort / scanRate * 1000) + ' мс, длинное ≈ ' + (S.holdLong / scanRate).toFixed(1).replace('.', ',') + ' с' : '—');
   }
   if (view === 'diag') renderDiag();
-  if (view === 'sync') drawSync(); else if (view === 'power') drawPower(); else if (view === 'start') drawStart(); else if (view === 'pwm') drawPwm(); else if (view === 'rpm') drawRpm(); else if (view === 'rec') drawRec();
+  if (view === 'sync') drawSync(); else if (view === 'power') drawPower(); else if (view === 'start') drawStart(); else if (view === 'pwm') drawPwm(); else if (view === 'rpm') drawRpm(); else if (view === 'rec') drawRec(); else if (view === 'an') drawAn();
 }
 attachPlotMouse($('livePlot'), liveData, () => { needDraw = true; });
 ['livePlot', 'tapePlot', 'specPlot', 'deepPlot'].forEach(id => hoverable($(id), () => { needDraw = true; }));
@@ -744,7 +744,7 @@ function tapeCSV() {
 // ---------------- LIVE: full capture memory (firmware v3+) ----------------
 const DEEP_A = 0x200006A8, DEEP_B = 0x20000AA8, DEEP_N = 1024;
 const deep = { buf: [null, null], cal: [null, null], t: 0, waiting: 0, next: 0, view: null };
-function deepWanted() { return mode === 'live' && ((view === 'scope' && (liveKind === 'deep' || liveKind === 'spec')) || ['sync', 'power', 'pwm', 'rpm'].includes(view)) && cur && cur.ver >= 3 && performance.now() - lastFrameAt < 2000; }
+function deepWanted() { return mode === 'live' && ((view === 'scope' && (liveKind === 'deep' || liveKind === 'spec')) || ['sync', 'power', 'pwm', 'rpm', 'an'].includes(view)) && cur && cur.ver >= 3 && performance.now() - lastFrameAt < 2000; }
 let memQueued = null, memSent = 0;   // manual reads (diagnostics) share the single firmware read slot with the deep reader
 function deepTick() {
   const now = performance.now();
@@ -1924,6 +1924,195 @@ function recInit() {
   recUI();
 }
 
+// ---- 8. power quality analyzer: harmonics + quality indices ----
+// GOST 32144-2013, voltage harmonics in % of the fundamental (95 % of time), network classes 0.38 / 6–25 / 35 / 110–220 kV
+const GOST = {
+  odd: { 5: [6, 4, 3, 1.5], 7: [5, 3, 2.5, 1], 11: [3.5, 2, 2, 1], 13: [3, 2, 1.5, 0.7], 17: [2, 1.5, 1, 0.5], 19: [1.5, 1, 1, 0.4], 23: [1.5, 1, 1, 0.4], 25: [1.5, 1, 1, 0.4] },
+  tri: { 3: [5, 3, 3, 1.5], 9: [1.5, 1, 1, 0.4], 15: [0.3, 0.3, 0.3, 0.2], 21: [0.2, 0.2, 0.2, 0.2] },
+  even: { 2: [2, 1.5, 1, 0.5], 4: [1, 0.7, 0.5, 0.3], 6: [0.5, 0.3, 0.3, 0.2], 8: [0.5, 0.3, 0.3, 0.2], 10: [0.5, 0.3, 0.3, 0.2], 12: [0.2, 0.2, 0.2, 0.2] },
+  thd: [8, 5, 4, 2.5], thd100: [12, 8, 6, 3.75],
+};
+function gostLimit(n, cls) {
+  if (n < 2) return null;
+  if (n % 2 === 0) return (GOST.even[n] || [0.2, 0.2, 0.2, 0.2])[cls];
+  if (n % 3 === 0) return (GOST.tri[n] || [0.2, 0.2, 0.2, 0.2])[cls];
+  return GOST.odd[n] ? GOST.odd[n][cls] : 0.2 + [1.3, 0.8, 0.6, 0.2][cls] * 25 / n;
+}
+const AN_DEF = { ch: 0, cls: 0, unom: 0, inom: 0, fnom: 50, avg: 3, kmax: 40 };
+const AN = { key: '', hist: [], max: [null, null], last: null };
+function anOne(c, ch) {   // one record of one channel → harmonics and indices
+  if (!ch || !ch.on) return null;
+  const { t, v, dt } = ch, fv = lpf(t, v), r = risingT(t, fv, 0.5, 0.2), f1 = freqOf(r.cr);
+  if (!f1 || r.cr.length < 3) return { err: 'нужно хотя бы 2 периода в записи — сделайте развёртку медленнее (5–10 мс/дел)' };
+  const w = winStats(t, v, r.cr); if (!w || !w.whole) return { err: 'нет целых периодов' };
+  const kmax = Math.max(2, Math.min(+S.an.kmax || 40, Math.floor(1 / (2 * dt) / f1) - 1));
+  const h = harmonicsOf(t, v, f1, w.a, w.b, kmax);
+  let pk = 0, sa = 0; for (let i = w.a; i < w.b; i++) { const x = Math.abs(v[i]); if (x > pk) pk = x; sa += x; }
+  return { f1, h, kmax, dc: w.mean, rms: w.rms, peak: pk, meanAbs: sa / (w.b - w.a), periods: r.cr.length - 1, clip: ch.clip, dt };
+}
+function anIndices(a, c) {   // derived values (from instantaneous or averaged harmonics)
+  const h = a.h, h1 = h[0] ? h[0].rms : 0; let s2 = 0, so = 0, se = 0, kn = 0, kd = 0;
+  for (const q of h) { kd += q.rms ** 2; kn += (q.k * q.rms) ** 2; if (q.k < 2) continue; s2 += q.rms ** 2; if (q.k % 2) so += q.rms ** 2; else se += q.rms ** 2; }
+  const ac = Math.sqrt(Math.max(0, a.rms ** 2 - a.dc ** 2));
+  return { h1, thd: h1 > 0 ? Math.sqrt(s2) / h1 * 100 : null, thdR: kd > 0 ? Math.sqrt(s2 / kd) * 100 : null, thdOdd: h1 > 0 ? Math.sqrt(so) / h1 * 100 : null, thdEven: h1 > 0 ? Math.sqrt(se) / h1 * 100 : null,
+    kf: kd > 0 ? kn / kd : null, crest: ac > 0 ? a.peak / a.rms : null, form: a.meanAbs > 0 ? a.rms / a.meanAbs : null, tdd: +S.an.inom > 0 ? Math.sqrt(s2) / +S.an.inom * 100 : null };
+}
+function anUpdate(sg) {
+  if (!sg || sg.key === AN.key) return;
+  AN.key = sg.key; const now = performance.now() / 1000;
+  const res = [0, 1].map(c => anOne(c, sg.ch[c]));
+  const inv = S.power.inv ? -1 : 1;
+  AN.hist.push({ t: now, res, deep: sg.deep, span: sg.span });
+  while (AN.hist.length && now - AN.hist[0].t > Math.max(0.01, +S.an.avg || 0)) AN.hist.shift();
+  res.forEach((r, c) => { if (r && !r.err) { const x = anIndices(r, c); if (x.thd != null && (AN.max[c] == null || x.thd > AN.max[c])) AN.max[c] = x.thd; } });
+  // average over the window: RMS-average of every harmonic, arithmetic mean of frequency / DC, max of peak
+  const agg = [0, 1].map(c => {
+    const L = AN.hist.map(e => e.res[c]).filter(r => r && !r.err); if (!L.length) { const e = res[c]; return e && e.err ? e : null; }
+    const last = L[L.length - 1], km = Math.min(...L.map(r => r.kmax)), h = [];
+    for (let k = 1; k <= km; k++) { let s = 0, sx = 0, sy = 0; for (const r of L) { const q = r.h[k - 1]; s += q.rms ** 2; sx += Math.cos(q.ph - k * r.h[0].ph); sy += Math.sin(q.ph - k * r.h[0].ph); } h.push({ k, rms: Math.sqrt(s / L.length), rel: Math.atan2(sy, sx) }); }
+    const m = f => L.reduce((s, r) => s + f(r), 0) / L.length;
+    return { f1: m(r => r.f1), h, kmax: km, dc: m(r => r.dc), rms: Math.sqrt(m(r => r.rms ** 2)), peak: Math.max(...L.map(r => r.peak)), meanAbs: m(r => r.meanAbs), periods: last.periods, clip: last.clip, dt: last.dt, n: L.length };
+  });
+  // harmonic active power per order (CH1 voltage, CH2 current, same record → same time base)
+  let pw = null;
+  if (UN(0) === 'В' && UN(1) === 'А') {
+    const L = AN.hist.filter(e => e.res[0] && !e.res[0].err && e.res[1] && !e.res[1].err);
+    if (L.length) { const km = Math.min(...L.map(e => Math.min(e.res[0].kmax, e.res[1].kmax))); pw = []; for (let k = 1; k <= km; k++) { let p = 0; for (const e of L) { const u = e.res[0].h[k - 1], i = e.res[1].h[k - 1]; p += inv * u.rms * i.rms * Math.cos(u.ph - i.ph); } pw.push({ k, p: p / L.length, u: agg[0] && agg[0].h[k - 1] ? agg[0].h[k - 1].rms : null, i: agg[1] && agg[1].h[k - 1] ? agg[1].h[k - 1].rms : null }); } }
+  }
+  AN.last = { agg, pw, deep: sg.deep, span: sg.span };
+}
+function drawAn() {
+  const sg = sigs(); anUpdate(sg);
+  const c = +S.an.ch, A = AN.last && AN.last.agg[c], col = [cssVar('--ch1'), cssVar('--ch2')][c], U = UN(c), isU = U === 'В', cls = +S.an.cls;
+  $('anSrc').textContent = sg ? srcNote(sg) + (AN.last && +S.an.avg ? ` · усреднение ${S.an.avg} с` : '') : 'нет данных от прибора';
+  const cv = canvasCtx($('anChart'));
+  if (!A || A.err) {
+    $('anTiles').innerHTML = tile(sg && sg.ch[c] && sg.ch[c].on ? 'Нет расчёта' : `CH${c + 1} выключен`, '—', A && A.err ? A.err : '');
+    $('anTable').innerHTML = ''; $('anPwBox').hidden = true; $('anNote').textContent = A && A.err ? A.err : 'нет данных';
+    if (cv) { cv.x.fillStyle = cssVar('--scr'); cv.x.fillRect(0, 0, cv.W, cv.H); }
+    return;
+  }
+  const X = anIndices(A, c), fnom = +S.an.fnom || 50, df = A.f1 - fnom, unom = +S.an.unom, dU = isU && unom > 0 ? (X.h1 / unom - 1) * 100 : null;
+  const st = (ok, warn) => ok ? 'ok' : warn ? '' : 'bad';
+  const thdLim = isU ? GOST.thd[cls] : null;
+  $('anTiles').innerHTML = [
+    tile('СКЗ (полное)', fmtC(c, A.rms, 4)), tile('1-я гармоника', fmtC(c, X.h1, 4), 'СКЗ основной'),
+    tile('Частота', fHz(A.f1), 'отклонение ' + (df >= 0 ? '+' : '−') + Math.abs(df).toFixed(3).replace('.', ',') + ' Гц · норма ±0,2', st(Math.abs(df) <= 0.2, Math.abs(df) <= 0.4)),
+    dU != null ? tile('Отклонение U', (dU >= 0 ? '+' : '') + pct(dU), 'по 1-й гармонике · норма ±10 %', st(Math.abs(dU) <= 10)) : '',
+    tile('КНИ (THD)', pct(X.thd, 2), isU ? `норма ≤ ${String(thdLim).replace('.', ',')} % (${NET_CLASS[cls]})` : 'от основной', isU ? st(X.thd <= thdLim, X.thd <= GOST.thd100[cls]) : ''),
+    tile('КНИ макс.', pct(AN.max[c], 2), 'с последнего сброса'),
+    tile('THD нечётн. / чётн.', pct(X.thdOdd, 1) + ' / ' + pct(X.thdEven, 1)),
+    tile('Пост. составляющая', fmtC(c, A.dc, 3), X.h1 ? pct(Math.abs(A.dc) / X.h1 * 100) + ' от основной' : ''),
+    tile('Коэф. амплитуды', X.crest ? X.crest.toFixed(3).replace('.', ',') : '—', 'пик/СКЗ · синус 1,414'),
+    tile('Коэф. формы', X.form ? X.form.toFixed(3).replace('.', ',') : '—', 'СКЗ/ср.выпр. · синус 1,111'),
+    !isU ? tile('K-фактор', X.kf ? X.kf.toFixed(2).replace('.', ',') : '—', 'нагрев трансформатора, синус = 1') : '',
+    !isU && X.tdd != null ? tile('TDD', pct(X.tdd, 2), 'гармоники к Iном') : '',
+  ].join('');
+  // chart: harmonics 2…kmax in % of the fundamental, with the GOST limit for voltage
+  if (cv) {
+    const { x, W, H } = cv, ml = 46, mr = 12, mt = 12, mb = 26, pw = W - ml - mr, ph = H - mt - mb;
+    x.fillStyle = cssVar('--scr'); x.fillRect(0, 0, W, H);
+    const hs = A.h.slice(1), vals = hs.map(q => X.h1 > 0 ? q.rms / X.h1 * 100 : 0), lims = hs.map(q => isU ? gostLimit(q.k, cls) : null);
+    const ymax = Math.max(1, ...vals, ...lims.filter(v => v != null)) * 1.15, bw = pw / Math.max(1, hs.length);
+    const Y = v => mt + ph - Math.min(1, v / ymax) * ph;
+    x.strokeStyle = cssVar('--grid2'); x.lineWidth = 1; x.fillStyle = '#86A9B3'; x.font = '11px Inter, sans-serif'; x.textAlign = 'right'; x.textBaseline = 'middle';
+    for (let j = 0; j <= 4; j++) { const v = ymax * j / 4, y = Math.round(Y(v)) + .5; x.beginPath(); x.moveTo(ml, y); x.lineTo(W - mr, y); x.stroke(); x.fillText(v.toFixed(ymax < 4 ? 1 : 0).replace('.', ',') + ' %', ml - 6, y); }
+    x.textAlign = 'center'; x.textBaseline = 'top';
+    hs.forEach((q, i) => {
+      const x0 = ml + i * bw, over = lims[i] != null && vals[i] > lims[i];
+      x.fillStyle = over ? '#E36A5C' : col; x.globalAlpha = .9; x.fillRect(x0 + bw * 0.15, Y(vals[i]), bw * 0.7, mt + ph - Y(vals[i])); x.globalAlpha = 1;
+      if (lims[i] != null) { x.strokeStyle = cssVar('--orange'); x.lineWidth = 2; x.beginPath(); x.moveTo(x0 + bw * 0.05, Y(lims[i])); x.lineTo(x0 + bw * 0.95, Y(lims[i])); x.stroke(); x.lineWidth = 1; }
+      if (bw > 14 || q.k % 5 === 0 || q.k === 2) { x.fillStyle = '#86A9B3'; x.fillText(String(q.k), x0 + bw / 2, mt + ph + 6); }
+    });
+    if (isU) { x.fillStyle = cssVar('--orange'); x.textAlign = 'right'; x.font = '600 11px Inter, sans-serif'; x.fillText('— норма ГОСТ 32144', W - mr - 4, mt + 2); }
+    const hv = $('anChart')._hover;
+    if (hv && hv.x >= ml && hv.x <= W - mr && hs.length) {
+      const i = Math.max(0, Math.min(hs.length - 1, Math.floor((hv.x - ml) / bw))), q = hs[i];
+      const lines = [{ t: `${q.k}-я · ${si(q.k * A.f1, 'Гц', 4)}`, c: '#E8F3F6' }, { t: pct(vals[i], 2) + ' · ' + fmtC(c, q.rms, 3), c: col }];
+      if (lims[i] != null) lines.push({ t: 'норма ≤ ' + pct(lims[i], 1), c: cssVar('--orange') });
+      hoverBox(x, { ml, mt, pw, ph }, ml + (i + 0.5) * bw, hv, lines, []);
+    }
+  }
+  // table
+  const rows = A.h.map((q, i) => {
+    const rel = X.h1 > 0 ? q.rms / X.h1 * 100 : null, lim = isU ? gostLimit(q.k, cls) : null, over = lim != null && rel > lim;
+    return `<tr class="${q.k === 1 ? 'f1' : over ? 'bad' : ''}"><td>${q.k}</td><td>${si(q.k * A.f1, 'Гц', 4)}</td><td>${fmtC(c, q.rms, 3)}</td><td>${q.k === 1 ? '100 %' : pct(rel, 2)}</td><td>${q.k === 1 ? '0°' : deg(wrap180(q.rel * 180 / Math.PI), 0)}</td><td>${lim != null ? '≤ ' + pct(lim, 1) : '—'}</td><td>${q.k === 1 ? '' : lim == null ? '' : over ? 'превышение' : 'норма'}</td></tr>`;
+  }).join('');
+  $('anTable').innerHTML = `<table><thead><tr><th>n</th><th>частота</th><th>СКЗ, ${U}</th><th>% от 1-й</th><th>фаза к 1-й</th><th>норма</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  // harmonic power direction
+  const P = AN.last.pw;
+  $('anPwBox').hidden = !P;
+  if (P) $('anPower').innerHTML = `<table><thead><tr><th>n</th><th>U, В</th><th>I, А</th><th>P<sub>n</sub>, Вт</th><th>направление</th></tr></thead><tbody>${P.filter(q => q.k <= 25).map(q => {
+    const small = Math.abs(q.p) < 0.002 * Math.abs(P[0].p);
+    return `<tr class="${q.k === 1 ? 'f1' : !small && q.p < 0 ? 'bad' : ''}"><td>${q.k}</td><td>${q.u != null ? si(q.u, '', 3) : '—'}</td><td>${q.i != null ? si(q.i, '', 3) : '—'}</td><td>${si(q.p, '', 3)}</td><td>${small ? '≈ 0' : q.p >= 0 ? 'сеть → нагрузка' : 'нагрузка → сеть'}</td></tr>`; }).join('')}</tbody></table>`;
+  const notes = [`окно ${A.periods} периодов`, `шаг ${fmtT(A.dt)}, гармоники до ${A.kmax}-й`];
+  if (A.n > 1) notes.push(`усреднено ${A.n} записей`);
+  if (A.kmax < (+S.an.kmax || 40)) notes.push(`выше ${A.kmax}-й не видно: мало точек на период — ускорьте развёртку`);
+  if (A.clip > 2) notes.push('сигнал обрезан краем экрана — гармоники завышены, увеличьте В/дел');
+  const vdC = sg && sg.fr.vdiv[c]; if (vdC && A.peak / vdC < 1.5) notes.push('сигнал мелкий на экране — растяните до 6–7 делений');
+  if (!isU) notes.push('нормы ГОСТ — только для напряжения (единица канала «В»)');
+  $('anNote').textContent = notes.join(' · ');
+}
+const NET_CLASS = ['0,38 кВ', '6–25 кВ', '35 кВ', '110–220 кВ'];
+function anCSV() {
+  const A = AN.last && AN.last.agg[+S.an.ch], c = +S.an.ch; if (!A || A.err) return toast('Нет расчёта');
+  const X = anIndices(A, c), U = UN(c), isU = U === 'В', cls = +S.an.cls;
+  const L = [`﻿гармоника;частота, Гц;СКЗ, ${U};% от 1-й;фаза к 1-й, °;норма ГОСТ 32144, %`];
+  for (const q of A.h) L.push([q.k, num(q.k * A.f1), num(q.rms), num(X.h1 ? q.rms / X.h1 * 100 : null, 4), q.k === 1 ? '0' : num(wrap180(q.rel * 180 / Math.PI), 4), isU && q.k > 1 ? num(gostLimit(q.k, cls), 3) : ''].join(';'));
+  L.push('', `канал;CH${c + 1}`, `частота, Гц;${num(A.f1)}`, `СКЗ, ${U};${num(A.rms)}`, `1-я гармоника, ${U};${num(X.h1)}`, `КНИ, %;${num(X.thd, 4)}`, `КНИ макс., %;${num(AN.max[c], 4)}`, `пост. составляющая, ${U};${num(A.dc)}`, `коэф. амплитуды;${num(X.crest, 4)}`, `коэф. формы;${num(X.form, 4)}`, `K-фактор;${num(X.kf, 4)}`);
+  if (isU) L.push(`класс сети;${NET_CLASS[cls]}`);
+  saveOut(`PUF_harm_CH${c + 1}_${stamp()}.csv`, utf8(L.join('\r\n')));
+}
+function anInit() {
+  S.an = Object.assign({}, AN_DEF, S.an || {});
+  segSet('anCh', S.an.ch); segInit('anCh', v => { S.an.ch = +v; saveSettings(); needDraw = true; });
+  const sel = (id, k) => { const el = $(id); el.value = String(S.an[k]); el.onchange = () => { S.an[k] = +el.value; AN.hist = []; AN.key = ''; saveSettings(); needDraw = true; }; };
+  sel('anCls', 'cls'); sel('anFnom', 'fnom'); sel('anAvg', 'avg'); sel('anKmax', 'kmax');
+  const numIn = (id, k) => { const el = $(id); el.value = S.an[k]; el.onchange = () => { const v = parseFloat(String(el.value).replace(',', '.')); S.an[k] = isFinite(v) && v >= 0 ? v : 0; el.value = S.an[k]; saveSettings(); needDraw = true; }; };
+  numIn('anUnom', 'unom'); numIn('anInom', 'inom');
+  $('anReset').onclick = () => { AN.hist = []; AN.max = [null, null]; AN.key = ''; needDraw = true; };
+  $('anCsv').onclick = anCSV;
+  $('anPng').onclick = () => saveOut(`PUF_harm_CH${+S.an.ch + 1}_${stamp()}.png`, canvasPNG($('anChart')));
+  hoverable($('anChart'), () => { needDraw = true; });
+}
+
+// ---- self-update ----
+let updInfo = null;
+async function updCheck(quiet) {
+  $('updState').textContent = 'проверяю…'; $('updState').className = 'chip';
+  try {
+    const r = updInfo = await (await api('/api/update/check')).json();
+    $('updApply').hidden = !r.available;
+    if (r.error) { $('updState').textContent = 'ошибка'; $('updText').textContent = r.error; if (!quiet) toast(r.error); }
+    else if (r.available) { $('updState').textContent = 'есть v' + r.latest; $('updState').className = 'chip st'; $('updApply').textContent = `Обновить до v${r.latest}`; $('updText').textContent = `Установлена v${r.current}, доступна v${r.latest}` + (r.size ? ` (${(r.size / 1048576).toFixed(1).replace('.', ',')} МБ)` : '') + (r.notes ? '. ' + r.notes : ''); for (const id of ['ver', 'ver2']) { $(id).classList.add('new'); $(id).title = 'Доступно обновление — нажмите'; } }
+    else { $('updState').textContent = 'актуальна'; $('updState').className = 'chip ok'; $('updText').textContent = `Установлена последняя версия v${r.current}.`; }
+    $('updTok').placeholder = r.token ? 'ключ задан (введите новый или оставьте пустым и сохраните, чтобы удалить)' : 'github_pat_…';
+  } catch (e) { $('updState').textContent = 'ошибка'; $('updText').textContent = 'Не удалось проверить: ' + e.message; }
+}
+async function updApply() {
+  if (!updInfo || !updInfo.available) return;
+  if (!confirm(`Обновить PUFService до v${updInfo.latest}? Программа скачает новую версию и перезапустится (окно обновится само).`)) return;
+  $('updApply').disabled = true; $('updState').textContent = 'скачиваю…'; $('updText').textContent = 'Скачиваю и проверяю новую версию…';
+  try {
+    const r = await fetch('/api/update/apply', { method: 'POST', headers: { 'X-PUF': '1' } }), j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    $('updState').textContent = 'перезапуск…'; $('updText').textContent = `Установлена v${j.version}. Программа перезапускается — окно обновится само через несколько секунд.`;
+    const t0 = Date.now(), want = j.version;
+    const poll = async () => {   // the new instance takes over the same address; reload once it answers with the new version
+      try { const p = await (await fetch('/api/ping', { cache: 'no-store' })).json(); if (p.version === want) return location.reload(); } catch (e) {}
+      if (Date.now() - t0 < 60000) setTimeout(poll, 700); else $('updText').textContent = 'Новая версия не ответила за минуту. Закройте окно и запустите PUFService заново.';
+    };
+    setTimeout(poll, 1200);
+  } catch (e) { $('updApply').disabled = false; $('updState').textContent = 'ошибка'; $('updText').textContent = 'Обновление не выполнено: ' + e.message; }
+}
+function updInit() {
+  $('updCheck').onclick = () => updCheck(false);
+  $('updApply').onclick = updApply;
+  $('updTokSave').onclick = async () => { try { await api('/api/update/token', { method: 'POST', body: JSON.stringify({ token: $('updTok').value }) }); $('updTok').value = ''; toast('Ключ сохранён'); updCheck(true); } catch (e) { toast('Не сохранилось: ' + e.message); } };
+  for (const id of ['ver', 'ver2']) $(id).onclick = () => { if ($(id).classList.contains('new')) { if (mode !== 'live') setMode('live'); setView('about'); } };
+  setTimeout(() => updCheck(true), 4000);   // quiet check after start
+}
+
 // ---- wiring ----
 function initDrive() {
   buildSensors();
@@ -1938,7 +2127,7 @@ function initDrive() {
   segSet('rpCh', S.rpm.ch); segInit('rpCh', v => { S.rpm.ch = +v; RPM.t.length = RPM.v.length = 0; saveSettings(); needDraw = true; });
   bindNum('rpPpr', S.rpm, 'ppr'); bindNum('rpPoles', S.rpm, 'poles'); bindNum('rpFman', S.rpm, 'fman');
   $('rpFsrc').value = S.rpm.fsrc; $('rpFsrc').onchange = e => { S.rpm.fsrc = e.target.value; saveSettings(); needDraw = true; };
-  startUI(); recInit();
+  startUI(); recInit(); anInit(); updInit();
   setInterval(trendPush, 30);
 }
 

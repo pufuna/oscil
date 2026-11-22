@@ -27,7 +27,7 @@
   <div class="conn" id="conn" title="Состояние связи"><i class="dot"></i><span id="connText">поиск прибора…</span></div>
   <button class="ibtn" id="bPort" title="Выбор порта"><svg viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0zM12 17v4"/></svg></button>
   <button class="ibtn" id="bTheme" title="Светлая / тёмная тема"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg></button>
-  <span class="ver" id="ver">v1.4.0</span>
+  <span class="ver" id="ver">v1.5.0</span>
 </header>
 
 <div class="body">
@@ -39,6 +39,7 @@
       <button data-view="sens"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>Датчики</span></button>
       <button data-view="sync"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 12l4-6"/><path d="M12 3v2"/></svg><span>Синхроскоп</span></button>
       <button data-view="power"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg><span>Мощность</span></button>
+      <button data-view="an"><svg viewBox="0 0 24 24"><path d="M4 20V9M8 20v-5M12 20V4M16 20v-8M20 20v-3"/></svg><span>Анализатор</span></button>
       <button data-view="start"><svg viewBox="0 0 24 24"><path d="M3 20h18M4 17c3 0 3-12 6-12s3 8 6 8 3-3 5-3"/></svg><span>Пуск</span></button>
       <button data-view="rec"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/></svg><span>Регистратор</span></button>
       <button data-view="pwm"><svg viewBox="0 0 24 24"><path d="M3 17h3V7h3v10h2V7h5v10h2V7h3"/></svg><span>ШИМ</span></button>
@@ -262,6 +263,42 @@
       </div>
     </section>
 
+    <!-- ============ DRIVE: POWER QUALITY ANALYZER ============ -->
+    <section class="view" id="v-an">
+      <div class="grid2">
+        <div class="col">
+          <div class="card">
+            <div class="ch"><b>Анализатор качества</b><div class="seg sm" id="anCh"><button data-v="0" class="c1 on">CH1</button><button data-v="1" class="c2">CH2</button></div><span class="spacer"></span><span class="hint inl" id="anSrc"></span>
+              <button class="tbtn" id="anReset" title="Сбросить максимумы и усреднение">Сброс</button>
+              <button class="tbtn" id="anPng"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="4"/><path d="M8 6l2-3h4l2 3"/></svg>PNG</button>
+              <button class="tbtn" id="anCsv"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h7M9 17h7M9 9h3"/></svg>CSV</button>
+            </div>
+            <div class="tiles" id="anTiles"></div>
+            <div class="trendwrap small" style="height:260px"><canvas id="anChart"></canvas></div>
+            <div class="htab" id="anTable"></div>
+            <div id="anPwBox" hidden>
+              <div class="ch" style="margin-top:14px"><b>Направление гармоник</b><span class="spacer"></span><span class="hint inl">CH1 — напряжение (В), CH2 — ток (А)</span></div>
+              <p class="hint">Активная мощность каждой гармоники P<sub>n</sub> = U<sub>n</sub>·I<sub>n</sub>·cos φ<sub>n</sub>. Знак «−» у высших гармоник значит, что гармоника идёт <b>от нагрузки в сеть</b> — источник искажений нагрузка (например, ПЧ), а не сеть. Ток должен быть измерен в направлении «сеть → нагрузка» (иначе включите «Инвертировать ток» на странице «Мощность»).</p>
+              <div class="htab" id="anPower"></div>
+            </div>
+          </div>
+        </div>
+        <div class="col side-col">
+          <div class="card">
+            <div class="ch"><b>Настройки</b></div>
+            <div class="row"><span>Сеть (для норм)</span><select id="anCls"><option value="0">0,38 кВ</option><option value="1">6–25 кВ</option><option value="2">35 кВ</option><option value="3">110–220 кВ</option></select></div>
+            <div class="row"><span>Номинал U</span><input type="number" id="anUnom" step="any" min="0"><span class="u" title="Того напряжения, что подано на канал (фазное или линейное), с учётом коэффициента датчика. 0 — не считать отклонение">для δU, 0 — нет</span></div>
+            <div class="row"><span>Номинал I</span><input type="number" id="anInom" step="any" min="0"><span class="u">для TDD, 0 — нет</span></div>
+            <div class="row"><span>Частота сети</span><select id="anFnom"><option value="50">50 Гц</option><option value="60">60 Гц</option></select></div>
+            <div class="row"><span>Усреднение</span><select id="anAvg"><option value="0">нет (каждый кадр)</option><option value="3">3 с</option><option value="10">10 с</option></select></div>
+            <div class="row"><span>Гармоник</span><select id="anKmax"><option value="25">до 25-й</option><option value="40">до 40-й</option><option value="50">до 50-й</option></select></div>
+            <div class="stinfo" id="anNote">—</div>
+            <div class="stinfo">Нормы — ГОСТ 32144-2013 для напряжения (значения, которые не должны превышаться 95 % времени). Это оценка по осциллографу, а не измерение сертифицированным анализатором: стандарт требует окна 10 периодов и усреднения за 10 мин. 2C53T — 8-битный АЦП: гармоники меньше ~0,3 % от основной неразличимы, поэтому растяните сигнал на 6–7 делений (без выхода за экран). Развёртка 5 мс/дел: в записи несколько периодов и гармоники до ~40-й.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ DRIVE: START ============ -->
     <section class="view" id="v-start">
       <div class="grid2">
@@ -416,7 +453,7 @@
     <section class="view" id="v-about">
       <div class="card about">
         <svg class="logo big" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="var(--teal)"/><path d="M5 18h4l3-9 4 15 3-11 2 5h6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="26" cy="18" r="2.2" fill="var(--orange)"/></svg>
-        <h2>PUFService <span class="ver" id="ver2">v1.4.0</span></h2>
+        <h2>PUFService <span class="ver" id="ver2">v1.5.0</span></h2>
         <p>Программа для работы с осциллографом FNIRSI 2C53T с доработанной прошивкой <b>RU_USB4</b>: просмотр сигнала в реальном времени, программная стабилизация, удалённое управление кнопками и просмотр сохранённых осциллограмм.</p>
         <ul>
           <li>Онлайн-режим работает, когда прибор подключён кабелем и находится в режиме осциллографа.</li>
@@ -424,6 +461,15 @@
           <li>Файлы PNG и CSV сохраняются в «Документы\PUFService».</li>
         </ul>
         <div class="lbtns"><button class="btn" id="bOpenOut">Открыть папку сохранений</button></div>
+        <div class="upd" id="updBox">
+          <div class="ch"><b>Обновление программы</b><span class="spacer"></span><span class="chip" id="updState">—</span></div>
+          <p class="hint" id="updText">Новая версия берётся из репозитория программы на GitHub (папка dist).</p>
+          <div class="lbtns"><button class="btn" id="updCheck">Проверить обновления</button><button class="btn pri" id="updApply" hidden>Обновить</button></div>
+          <details class="updtok"><summary>Ключ доступа GitHub (только если репозиторий приватный)</summary>
+            <p class="hint">Создайте на GitHub ключ «Fine-grained token» с доступом только к этому репозиторию и правом «Contents: Read-only». Ключ хранится только на этом компьютере (рядом с настройками) и обратно в интерфейс не передаётся.</p>
+            <div class="row"><span>Ключ</span><input type="password" id="updTok" placeholder="github_pat_…" autocomplete="off" style="flex:1"><button class="btn" id="updTokSave">Сохранить</button></div>
+          </details>
+        </div>
       </div>
     </section>
   </main>
