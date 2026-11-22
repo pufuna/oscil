@@ -44,7 +44,7 @@ const num = (x, d = 6) => x == null || !isFinite(x) ? '' : (+x.toPrecision(d)).t
 // ---------------- settings ----------------
 const S = { theme: 'light', keys: {}, holdShort: 6, holdLong: 90, tbDir: 1, st: { on: true, src: 'a', edge: 1, lvl: 'auto', level: 128, pos: 150 }, avg: 4, smooth: 0, zeroDev: true, sens: [{ k: 1, unit: 'В', name: '', preset: 'v1' }, { k: 1, unit: 'В', name: '', preset: 'v1' }],
   sync: { tolF: 0.1, tolPhi: 10, tolU: 5, offset: 0 }, power: { inv: false, mult: 1 }, start: { ch: 1, thr: 0, nom: 0, pre: 3, auto: true },
-  fps: 33, pwm: { ch: 0 }, rpm: { ch: 1, ppr: 1, poles: 2, fsrc: 'ch', fman: 50 }, fill: true, persist: false, show: [1, 1], zero: [0, 0] };
+  fps: 33, yLabels: true, pwm: { ch: 0 }, rpm: { ch: 1, ppr: 1, poles: 2, fsrc: 'ch', fman: 50 }, fill: true, persist: false, show: [1, 1], zero: [0, 0] };
 let saveT;
 function saveSettings() { clearTimeout(saveT); saveT = setTimeout(() => api('/api/settings', { method: 'POST', body: JSON.stringify(S) }).catch(() => {}), 400); }
 async function loadSettings() {
@@ -153,6 +153,7 @@ function onFrame(f) {
   if (recording) { recording.push(fr); $('bRec').lastChild.textContent = `Стоп (${recording.length})`; }
   TAPE.push(fr, [zeroRaw(0), zeroRaw(1)], Date.now() / 1000, (+S.fps || 33) / 1000);
   if (!frozen) process(fr);
+  if (lastTraceChange === now) recFeed(fr, now);   // event recorder: every distinct acquisition, also while paused
   needDraw = true;
 }
 
@@ -332,6 +333,7 @@ function drawScope(cv, data, opts = {}) {
     ctx.fillStyle = colors[c]; ctx.beginPath(); ctx.moveTo(4, zy - 8); ctx.lineTo(18, zy - 8); ctx.lineTo(25, zy); ctx.lineTo(18, zy + 8); ctx.lineTo(4, zy + 8); ctx.fill();
     ctx.fillStyle = '#0D1A20'; ctx.font = '600 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(c + 1), 13, zy + .5);
   }
+  if (!opts.compact) yAxisLabels(ctx, g, Y, [0, 1].filter(c => data.on[c]).map(c => ({ c, z: (data.v0[c] - 128) / PXDIV, vd: data.vdiv[c] })), colors, !!data.badge);
   // time axis labels
   if (!opts.compact) {
     ctx.fillStyle = '#86A9B3'; ctx.font = '11px Inter, sans-serif'; ctx.textBaseline = 'top';
@@ -372,6 +374,23 @@ function drawScope(cv, data, opts = {}) {
 }
 
 
+// values of the horizontal grid lines, in each channel's own scale (V/div × sensor factor, zero offset):
+// CH1 along the left edge, CH2 along the right edge, inside the grid
+function yAxisLabels(ctx, g, Y, chans, colors, skipTopRight) {
+  if (S.yLabels === false) return;
+  ctx.font = '10px Inter, sans-serif';
+  for (const { c, z, vd } of chans) {
+    if (!vd) continue;
+    const left = c === 0, x = left ? g.ml + 3 : g.ml + g.pw - 3; ctx.textAlign = left ? 'left' : 'right';
+    for (let d = -4; d <= 4; d++) {
+      if (!left && d === 4 && skipTopRight) continue;
+      let v = (d - z) * vd; if (Math.abs(v) < vd * 1e-6) v = 0;
+      const txt = si(v, UN(c), 3), w = ctx.measureText(txt).width, bottom = d === -4, y = Y(d) + (bottom ? -2 : 2);
+      ctx.fillStyle = 'rgba(10,22,28,.6)'; ctx.fillRect(left ? x - 2 : x - w - 2, bottom ? y - 12 : y, w + 4, 12);
+      ctx.textBaseline = bottom ? 'bottom' : 'top'; ctx.fillStyle = colors[c]; ctx.fillText(txt, x, y);
+    }
+  }
+}
 function hoverBox(ctx, g, x, hv, lines, dots) {
   ctx.strokeStyle = 'rgba(232,243,246,.55)'; ctx.lineWidth = 1; ctx.setLineDash([]);
   ctx.beginPath(); ctx.moveTo(Math.round(x) + .5, g.mt); ctx.lineTo(Math.round(x) + .5, g.mt + g.ph); ctx.stroke();
@@ -520,7 +539,7 @@ function drawLive() {
     $('scanInfo').textContent = 'частота опроса кнопок: ' + (scanRate ? Math.round(scanRate) + ' раз/с — короткое ≈ ' + Math.round(S.holdShort / scanRate * 1000) + ' мс, длинное ≈ ' + (S.holdLong / scanRate).toFixed(1).replace('.', ',') + ' с' : '—');
   }
   if (view === 'diag') renderDiag();
-  if (view === 'sync') drawSync(); else if (view === 'power') drawPower(); else if (view === 'start') drawStart(); else if (view === 'pwm') drawPwm(); else if (view === 'rpm') drawRpm();
+  if (view === 'sync') drawSync(); else if (view === 'power') drawPower(); else if (view === 'start') drawStart(); else if (view === 'pwm') drawPwm(); else if (view === 'rpm') drawRpm(); else if (view === 'rec') drawRec();
 }
 attachPlotMouse($('livePlot'), liveData, () => { needDraw = true; });
 ['livePlot', 'tapePlot', 'specPlot', 'deepPlot'].forEach(id => hoverable($(id), () => { needDraw = true; }));
@@ -636,6 +655,7 @@ function drawTapeView() {
   ctx.restore();
   // zero markers
   for (const c of [0, 1]) { if (!S.show[c]) continue; const zy = Math.max(g.mt, Math.min(g.mt + g.ph, Y(zeroDiv(c)))); ctx.fillStyle = colors[c]; ctx.beginPath(); ctx.moveTo(4, zy - 8); ctx.lineTo(18, zy - 8); ctx.lineTo(25, zy); ctx.lineTo(18, zy + 8); ctx.lineTo(4, zy + 8); ctx.fill(); ctx.fillStyle = '#0D1A20'; ctx.font = '600 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(c + 1), 13, zy + .5); }
+  yAxisLabels(ctx, g, Y, [0, 1].filter(c => S.show[c] && cur && cur.vdiv[c]).map(c => ({ c, z: zeroDiv(c), vd: cur.vdiv[c] })), colors, true);
   // time labels relative to the newest sample
   const tNow = T.len ? T.t[T.len - 1] : 0;
   ctx.fillStyle = '#86A9B3'; ctx.font = '11px Inter, sans-serif'; ctx.textBaseline = 'top';
@@ -1606,13 +1626,19 @@ function drawTrendChart(cv, t, panes, opts = {}) {
     const top = 8 + k * (ph + gap);
     x.strokeStyle = cssVar('--grid2'); x.lineWidth = 1;
     for (let j = 0; j <= 4; j++) { const y = Math.round(top + j / 4 * ph) + .5; x.beginPath(); x.moveTo(ml, y); x.lineTo(W - mr, y); x.stroke(); }
+    // p.shared: one scale for all series of the pane (to compare CH1 and CH2 directly); p.range: fixed scale
+    let shLo = Infinity, shHi = -Infinity;
+    if (p.shared) { const all = []; for (const s of p.series) for (const x of s.v) if (isFinite(x)) all.push(x); all.sort((a, b) => a - b); if (all.length) { shLo = all[Math.floor(all.length * 0.01)]; shHi = all[Math.ceil(all.length * 0.99) - 1]; } }   // 1…99 %: a single bad frame must not flatten the plot
     p.series.forEach((s, si_) => {
-      const vals = s.v.filter(isFinite); if (!vals.length) return;
-      let lo = Math.min(...vals), hi = Math.max(...vals); if (p.zero) lo = Math.min(0, lo); if (hi - lo < 1e-12) { hi += Math.abs(hi) * 0.05 + 1e-6; lo -= Math.abs(lo) * 0.05 + 1e-6; } hi += (hi - lo) * 0.08;
+      let lo = Infinity, hi = -Infinity; for (const x of s.v) if (isFinite(x)) { if (x < lo) lo = x; if (x > hi) hi = x; }
+      if (!(hi >= lo)) return;
+      if (p.shared) { lo = shLo; hi = shHi; } if (p.zero) lo = Math.min(0, lo); if (hi - lo < 1e-12) { hi += Math.abs(hi) * 0.05 + 1e-6; lo -= Math.abs(lo) * 0.05 + 1e-6; } hi += (hi - lo) * 0.08;
+      if (p.range) [lo, hi] = p.range;
       const Y = v => top + ph - (v - lo) / (hi - lo) * ph;
+      x.save(); x.beginPath(); x.rect(ml, top - 1, W - ml - mr, ph + 2); x.clip();   // out-of-scale values stay inside their pane
       x.strokeStyle = s.color; x.lineWidth = 1.6; x.beginPath(); let pen = false;
       for (let i = 0; i < t.length; i++) { if (t[i] < t0 || t[i] > t1 || !isFinite(s.v[i])) { pen = false; continue; } const px = X(t[i]), py = Y(s.v[i]); if (!pen) { x.moveTo(px, py); pen = true; } else x.lineTo(px, py); }
-      x.stroke();
+      x.stroke(); x.restore();
       x.fillStyle = s.color; x.font = '11px Inter, sans-serif'; x.textBaseline = 'middle'; x.textAlign = si_ === 0 ? 'right' : 'left';
       for (let j = 0; j <= 4; j += 2) { const v = hi - j / 4 * (hi - lo); x.fillText(s.unit === '' ? Math.round(v).toLocaleString('ru-RU') : si(v, s.unit, 3), si_ === 0 ? ml - 6 : W - mr + 6, top + j / 4 * ph); }
       if (s.mark != null) { x.strokeStyle = s.color; x.setLineDash([5, 4]); x.globalAlpha = .6; x.beginPath(); x.moveTo(ml, Y(s.mark)); x.lineTo(W - mr, Y(s.mark)); x.stroke(); x.setLineDash([]); x.globalAlpha = 1; }
@@ -1716,6 +1742,188 @@ function drawRpm() {
   drawTrendChart($('rpChart'), RPM.t, [{ title: 'об/мин', series: [{ v: RPM.v, color: cssVar('--teal2'), unit: '' }] }], { t0: RPM.t.length ? RPM.t[RPM.t.length - 1] - 60 : 0, empty: 'обороты появятся, когда в записи будет 2+ импульса' });
 }
 
+// ---- 7. event recorder: triggers + pre-history ----
+// Every new device frame (a distinct acquisition) goes into a ring buffer together with its metrics
+// (RMS, frequency, CH2→CH1 angle). A trigger turns the buffer into an event that keeps growing for «post» seconds.
+const REC_TRIG = [
+  { id: 'syncStart', name: 'Начало синхронизации', hint: 'частота CH2 подошла к частоте CH1 ближе порога (ПЧ начал подгонку)', p: [['df', '|Δf| меньше', 'Гц', 1]] },
+  { id: 'syncOk', name: 'Синхронизм достигнут', hint: 'Δf, Δφ и ΔU вошли в допуски синхроскопа (страница «Синхроскоп»)', p: [] },
+  { id: 'powerOn', name: 'Подача напряжения', hint: 'СКЗ канала выросло выше порога после того, как было ниже половины порога. 0 — авто: 1 деление экрана', ch: true, p: [['thr', 'порог СКЗ', 'unit', 0]] },
+  { id: 'dip', name: 'Провал / пропадание', hint: 'СКЗ упало ниже заданного % от среднего за предыдущие 2 с', ch: true, p: [['pct', 'ниже', '%', 70]] },
+  { id: 'surge', name: 'Бросок', hint: 'СКЗ выросло выше заданного % от среднего за предыдущие 2 с — например, бросок тока при переключении с ПЧ на сеть', ch: true, p: [['pct', 'выше', '%', 150]] },
+  { id: 'freq', name: 'Уход частоты', hint: 'частота канала вышла за номинал ± допуск', ch: true, p: [['nom', 'номинал', 'Гц', 50], ['df', 'допуск ±', 'Гц', 0.5]] },
+  { id: 'phase', name: 'Угол Δφ', hint: 'угол CH2 относительно CH1 вошёл в окно ± (с учётом поправки угла синхроскопа)', p: [['deg', '|Δφ| меньше', '°', 10]] },
+];
+const REC_DEF = { pre: 5, post: 20, extend: true, autosave: true, rearm: false, trig: { syncStart: { on: true, df: 1 }, syncOk: { on: false }, powerOn: { on: true, ch: 0, thr: 0 }, dip: { on: false, ch: 0, pct: 70 }, surge: { on: false, ch: 1, pct: 150 }, freq: { on: false, ch: 0, nom: 50, df: 0.5 }, phase: { on: false, deg: 10 } } };
+function recDefaults() {   // settings from an older version may miss new fields
+  const r = S.rec = Object.assign({}, REC_DEF, S.rec || {}); r.trig = Object.assign({}, r.trig || {});
+  for (const k in REC_DEF.trig) r.trig[k] = Object.assign({}, REC_DEF.trig[k], r.trig[k] || {});
+}
+const REC = { buf: [], armed: false, ev: null, events: [], sel: null, pos: null, follow: true, prev: {}, fired: {}, low: [false, false], primed: false, seq: 0 };
+const REC_MAX = 20000;   // frames per event (memory guard)
+function recZero(fr, c) { return S.zeroDev ? 128 + s8(fr.g[4 + c]) : 128 + S.zero[c] * PXDIV; }
+function frameMetrics(fr) {
+  const m = { rms: [NaN, NaN], f: [NaN, NaN], dphi: NaN, z: [recZero(fr, 0), recZero(fr, 1)] };
+  if (!fr.tdiv) return m;
+  const dtS = fr.tdiv / PXDIV, t = new Float64Array(N); for (let i = 0; i < N; i++) t[i] = i * dtS;
+  const cr = [null, null];
+  for (const c of [0, 1]) {
+    if (!(fr.mask & (1 << c))) continue;
+    const vd = fr.vdiv[c] || 1, v = new Float64Array(N); for (let i = 0; i < N; i++) v[i] = (fr.raw[c][i] - m.z[c]) / PXDIV * vd;
+    const r = risingT(t, lpf(t, v), 0.5, 0.2), w = winStats(t, v, r.cr);
+    m.rms[c] = w ? w.rms : NaN; const f = freqOf(r.cr);
+    // a real periodic signal has equal periods; noise crossings don't — reject the frequency if periods spread > 15 %
+    let regular = r.cr.length >= 3; if (regular) { let a = Infinity, b = 0; for (let k = 1; k < r.cr.length; k++) { const d = r.cr[k] - r.cr[k - 1]; if (d < a) a = d; if (d > b) b = d; } regular = (b - a) / ((r.cr[r.cr.length - 1] - r.cr[0]) / (r.cr.length - 1)) < (r.cr.length >= 4 ? 0.15 : 0.05); }
+    if (f && regular && m.rms[c] > 0.1 * vd) { m.f[c] = f; cr[c] = r.cr; }
+  }
+  if (cr[0] && cr[1]) { const phi = phaseBA(cr[0], cr[1], 1 / m.f[0]); if (phi != null) m.dphi = wrap180(-phi - (+S.sync.offset || 0)); }
+  return m;
+}
+function recRef(c, t) {   // mean RMS over [t-2.5 s, t-0.3 s]
+  let s = 0, n = 0; for (let i = REC.buf.length - 1; i >= 0; i--) { const q = REC.buf[i]; if (q.t < t - 2.5) break; if (q.t <= t - 0.3 && isFinite(q.m.rms[c])) { s += q.m.rms[c]; n++; } }
+  return n >= 4 ? s / n : null;
+}
+function recConds(q) {   // current truth value of every trigger condition (edges are taken in recFeed)
+  // hysteresis: a condition that is already true stays true on a looser threshold, so noise near the limit doesn't chatter
+  const T = S.rec.trig, m = q.m, fr = q.fr, out = {}, P = REC.prev;
+  const pres = c => isFinite(m.rms[c]) && isFinite(m.f[c]) && m.rms[c] > 0.3 * (fr.vdiv[c] || 1);
+  const both = pres(0) && pres(1), df = m.f[1] - m.f[0];
+  out.syncStart = both && Math.abs(df) < +T.syncStart.df * (P.syncStart ? 1.3 : 1);
+  const dU = both ? (m.rms[1] - m.rms[0]) / m.rms[0] * 100 : NaN;
+  const hy = P.syncOk ? 1.3 : 1;
+  out.syncOk = both && Math.abs(df) <= +S.sync.tolF * hy && Math.abs(m.dphi) <= +S.sync.tolPhi * hy && Math.abs(dU) <= +S.sync.tolU * hy;
+  out.phase = both && Math.abs(m.dphi) < +T.phase.deg * (P.phase ? 1.5 : 1);
+  { const c = +T.powerOn.ch, thr = +T.powerOn.thr > 0 ? +T.powerOn.thr : (fr.vdiv[c] || 1), r = m.rms[c];
+    if (isFinite(r) && r < 0.5 * thr) REC.low[c] = true;
+    out.powerOn = REC.low[c] && isFinite(r) && r > thr; }
+  { const c = +T.dip.ch, ref = recRef(c, q.t); out.dip = ref != null && ref > 0.1 * (fr.vdiv[c] || 1) && m.rms[c] < (+T.dip.pct + (P.dip ? 5 : 0)) / 100 * ref; }
+  { const c = +T.surge.ch, ref = recRef(c, q.t); out.surge = ref != null && ref > 0.1 * (fr.vdiv[c] || 1) && m.rms[c] > (+T.surge.pct - (P.surge ? 5 : 0)) / 100 * ref; }
+  { const c = +T.freq.ch; out.freq = pres(c) && Math.abs(m.f[c] - +T.freq.nom) > +T.freq.df * (P.freq ? 0.8 : 1); }
+  return out;
+}
+const recName = id => id === 'manual' ? 'вручную' : (REC_TRIG.find(x => x.id === id) || {}).name || id;
+function recFeed(fr, nowMs) {
+  const q = { fr, m: frameMetrics(fr), t: nowMs / 1000, wall: Date.now() };
+  REC.buf.push(q);
+  const keep = Math.max(3, +S.rec.pre || 0) + 0.5; while (REC.buf.length && REC.buf[0].t < q.t - keep) REC.buf.shift();
+  const ev = REC.ev;
+  if (ev) { if (ev.frames.length < REC_MAX) ev.frames.push(q); else ev.cut = true; }
+  // triggers: fire on false→true; the first frame after arming only records the state
+  const c = recConds(q), hits = [];
+  // fire on false→true, at most once per 2 s per trigger
+  for (const k in c) { if (c[k] && !REC.prev[k] && REC.primed && S.rec.trig[k] && S.rec.trig[k].on && !(q.t - (REC.fired[k] || -1e9) < 2)) { hits.push(k); REC.fired[k] = q.t; } REC.prev[k] = c[k]; }
+  if (c.powerOn) REC.low[+S.rec.trig.powerOn.ch] = false;
+  REC.primed = true;
+  if (!hits.length) return;
+  if (ev) { for (const h of hits) ev.marks.push({ t: q.t, id: h }); if (S.rec.extend) ev.end = Math.min(ev.tTrig + 600, Math.max(ev.end, q.t + (+S.rec.post || 20))); }
+  else if (REC.armed) recStart(hits[0], q.t, hits);
+}
+function recStart(id, t, hits = [id]) {
+  const pre = +S.rec.pre || 0;
+  const ev = REC.ev = { n: ++REC.seq, id, tTrig: t, wall: Date.now(), end: t + (+S.rec.post || 20), frames: REC.buf.filter(q => q.t >= t - pre), marks: hits.map(h => ({ t, id: h })), done: false };
+  REC.events.unshift(ev); while (REC.events.length > 6) REC.events.pop();   // older events: save them, memory is limited
+  REC.sel = ev; REC.follow = true; recUI(); needDraw = true;
+}
+function recFinish() {
+  const ev = REC.ev; if (!ev) return; REC.ev = null; ev.done = true;
+  if (S.rec.autosave) recSave(ev);
+  if (!S.rec.rearm) REC.armed = false; else { REC.primed = false; REC.prev = {}; }
+  REC.follow = false; REC.pos = null; recUI(); needDraw = true;
+}
+setInterval(() => { const ev = REC.ev; if (ev && performance.now() / 1000 > ev.end) recFinish(); }, 200);
+function recFileBase(ev) { const d = new Date(ev.wall), p = n => String(n).padStart(2, '0'); return `PUF_event_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}_${ev.id}`; }
+function recSave(ev) {
+  if (!ev || !ev.frames.length) return toast('Нет данных события');
+  // frames: same layout as «Запись» on the scope page — opens in «Записи» with the frame slider
+  const fr0 = ev.frames, step = Math.max(1, Math.ceil(fr0.length / 6000));
+  const L = [`﻿кадр;время, с;CH1, ${UN(0)};CH2, ${UN(1)};развёртка, с/дел;CH1 ${UN(0)}/дел;CH2 ${UN(1)}/дел;от триггера, с`];
+  for (let k = 0; k < fr0.length; k += step) {
+    const { fr, m, t } = fr0[k];
+    for (let i = 0; i < N; i++) {
+      const v = c => (fr.mask & (1 << c)) ? num((fr.raw[c][i] - m.z[c]) / PXDIV * (fr.vdiv[c] || 1)) : '';
+      L.push([k, num(fr.tdiv ? (i - 150) * fr.tdiv / PXDIV : i), v(0), v(1), i ? '' : num(fr.tdiv), i ? '' : num(fr.vdiv[0]), i ? '' : num(fr.vdiv[1]), i ? '' : num(t - ev.tTrig, 6)].join(';'));
+    }
+  }
+  const T = [`﻿время от триггера, с;CH1 СКЗ, ${UN(0)};CH2 СКЗ, ${UN(1)};CH1 f, Гц;CH2 f, Гц;Δf, Гц;Δφ, °;отметка`];
+  let mi = 0; const marks = ev.marks.slice().sort((a, b) => a.t - b.t);
+  for (const { m, t } of fr0) {
+    let mk = ''; while (mi < marks.length && marks[mi].t <= t + 1e-6) { mk += (mk ? ', ' : '') + recName(marks[mi].id); mi++; }
+    T.push([num(t - ev.tTrig, 6), num(m.rms[0]), num(m.rms[1]), num(m.f[0]), num(m.f[1]), num(m.f[1] - m.f[0]), num(m.dphi, 4), mk].join(';'));
+  }
+  const base = recFileBase(ev);
+  saveOut(base + '.csv', utf8(L.join('\r\n'))).then(() => saveOut(base + '_trend.csv', utf8(T.join('\r\n'))));
+  if (step > 1) toast(`Событие длинное: в CSV кадров записан каждый ${step}-й, тренд — полностью`);
+}
+function recUI() {
+  const ev = REC.ev;
+  const st = ev ? `● запись: ${recName(ev.id)}` : REC.armed ? 'жду событие' : 'выключен';
+  $('rcState').textContent = st; $('rcState').className = 'chip ' + (ev ? 'st' : REC.armed ? 'ok' : '');
+  $('rcArm').classList.toggle('on', REC.armed); $('rcArm').textContent = REC.armed ? 'Жду событие…' : 'Ждать событие';
+  $('rcNow').classList.toggle('on', !!ev);
+  const l = $('rcList');
+  l.innerHTML = REC.events.length ? '' : '<div class="fempty">Событий пока нет. Отметьте триггеры справа и нажмите «Ждать событие» — или «Записать сейчас».</div>';
+  for (const e of REC.events) {
+    const d = document.createElement('div'); d.className = 'ev' + (e === REC.sel ? ' on' : '');
+    const dur = e.frames.length ? e.frames[e.frames.length - 1].t - e.frames[0].t : 0;
+    d.innerHTML = `<b>№${e.n}</b><span>${new Date(e.wall).toLocaleTimeString('ru-RU')}</span><b>${esc(recName(e.id))}</b>${e.marks.length > 1 ? `<span>+${e.marks.length - 1} сраб.</span>` : ''}<i class="sp"></i>${e.done ? '' : '<i class="live">идёт запись</i>'}<span>${durText(dur)} · ${e.frames.length.toLocaleString('ru-RU')} кадр.${e.cut ? ' (обрезано)' : ''}</span>`;
+    d.onclick = () => { REC.sel = e; REC.pos = null; REC.follow = !e.done; recUI(); needDraw = true; };
+    l.append(d);
+  }
+}
+function buildRecTriggers() {
+  const box = $('rcTrig'); box.innerHTML = '';
+  for (const d of REC_TRIG) {
+    const cfg = S.rec.trig[d.id], w = document.createElement('div'); w.className = 'trig' + (cfg.on ? '' : ' off');
+    w.innerHTML = `<div class="th"><b>${d.name}</b><label class="sw"><input type="checkbox"${cfg.on ? ' checked' : ''}><i></i></label></div><p>${d.hint}</p>`
+      + (d.ch ? `<div class="row"><span>Канал</span><div class="seg sm"><button data-v="0" class="c1${+cfg.ch === 0 ? ' on' : ''}">CH1</button><button data-v="1" class="c2${+cfg.ch === 1 ? ' on' : ''}">CH2</button></div></div>` : '')
+      + d.p.map(([k, lbl, u]) => `<div class="row"><span>${lbl}</span><input type="number" step="any" data-k="${k}" value="${cfg[k]}"><span class="u" data-u="${u}">${u === 'unit' ? UN(+cfg.ch || 0) : u}</span></div>`).join('');
+    w.querySelector('.th input').onchange = e => { cfg.on = e.target.checked; w.classList.toggle('off', !cfg.on); REC.prev[d.id] = true; saveSettings(); };
+    w.querySelectorAll('.seg button').forEach(b => b.onclick = () => { cfg.ch = +b.dataset.v; w.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b)); w.querySelectorAll('[data-u="unit"]').forEach(x => x.textContent = UN(cfg.ch)); REC.low = [false, false]; saveSettings(); });
+    w.querySelectorAll('input[data-k]').forEach(inp => inp.onchange = () => { const v = parseFloat(String(inp.value).replace(',', '.')); if (isFinite(v) && v >= 0) cfg[inp.dataset.k] = v; inp.value = cfg[inp.dataset.k]; saveSettings(); });
+    box.append(w);
+  }
+}
+function drawRec() {
+  const ev = REC.sel, list = ev ? ev.frames : REC.buf, col = [cssVar('--ch1'), cssVar('--ch2')];
+  const t = list.map(q => q.t), ser = k => list.map(q => q.m[k[0]][k[1]]);
+  let idx = list.length - 1;
+  if (ev && !REC.follow && REC.pos != null) idx = Math.min(list.length - 1, REC.pos);
+  else if (ev && ev.done && REC.pos == null) { idx = Math.max(0, list.findIndex(q => q.t >= ev.tTrig)); REC.pos = idx; }
+  const sl = $('rcPos'); sl.max = Math.max(0, list.length - 1); if (document.activeElement !== sl) sl.value = idx;
+  const ref = ev ? ev.tTrig : (t.length ? t[t.length - 1] : 0);
+  drawTrendChart($('rcChart'), t, [
+    { title: 'СКЗ', zero: true, shared: UN(0) === UN(1), series: [{ v: ser(['rms', 0]), color: col[0], unit: UN(0) }, { v: ser(['rms', 1]), color: col[1], unit: UN(1) }] },
+    { title: 'Частота', shared: true, series: [{ v: ser(['f', 0]), color: col[0], unit: 'Гц' }, { v: ser(['f', 1]), color: col[1], unit: 'Гц' }] },
+    { title: 'Угол CH2 к CH1, °', range: [-180, 180], series: [{ v: list.map(q => q.m.dphi), color: cssVar('--orange'), unit: '' }] },
+  ], { t0: t[0], t1: t[t.length - 1], ref, vline: idx >= 0 ? t[idx] : null, empty: ev ? 'нет кадров' : 'жду кадры от прибора…' });
+  const q = list[idx];
+  if (q) {
+    const fr = q.fr, on = [0, 1].map(c => !!(fr.mask & (1 << c)));
+    drawScope($('rcScope'), { n: N, y: [Float32Array.from(fr.raw[0]), Float32Array.from(fr.raw[1])], on, v0: q.m.z, vdiv: fr.vdiv, tdiv: fr.tdiv, trigX: null }, { compact: true });
+    $('rcPosTxt').textContent = `${idx + 1} из ${list.length} · ` + (ev ? (q.t - ev.tTrig >= 0 ? '+' : '−') + fmtT(Math.abs(q.t - ev.tTrig)) + ' от срабатывания' : 'сейчас (без записи)');
+    const m = q.m, df = m.f[1] - m.f[0];
+    const mk = ev ? ev.marks.filter(x => Math.abs(x.t - q.t) < 0.05).map(x => recName(x.id)).join(', ') : '';
+    $('rcTiles').innerHTML = [tile('U CH1 (СКЗ)', fmtC(0, m.rms[0], 4)), tile('U CH2 (СКЗ)', fmtC(1, m.rms[1], 4)), tile('f CH1', fHz(m.f[0])), tile('f CH2', fHz(m.f[1])),
+      tile('Δf', isFinite(df) ? (df >= 0 ? '+' : '−') + Math.abs(df).toFixed(3).replace('.', ',') + ' Гц' : '—'), tile('Угол Δφ', deg(m.dphi), 'CH2 к CH1, с поправкой'),
+      tile('Развёртка', fr.tdiv ? tdivName(fr.tdiv) : '?', mk ? 'сработал: ' + mk : '')].join('');
+  } else { drawScope($('rcScope'), null, { compact: true }); $('rcPosTxt').textContent = '—'; $('rcTiles').innerHTML = ''; }
+}
+function recInit() {
+  recDefaults(); buildRecTriggers();
+  const bind = (id, k, cast = Number) => { const el = $(id); if (el.type === 'checkbox') { el.checked = !!S.rec[k]; el.onchange = () => { S.rec[k] = el.checked; saveSettings(); }; } else { el.value = S.rec[k]; el.onchange = () => { const v = cast(String(el.value).replace(',', '.')); if (isFinite(v) && v >= 0) S.rec[k] = Math.min(+el.max || Infinity, v); el.value = S.rec[k]; saveSettings(); }; } };
+  bind('rcPre', 'pre'); bind('rcPost', 'post'); bind('rcExtend', 'extend'); bind('rcAuto', 'autosave'); bind('rcRearm', 'rearm');
+  $('rcArm').onclick = () => {
+    if (!REC_TRIG.some(d => S.rec.trig[d.id].on)) return toast('Отметьте хотя бы один триггер');
+    REC.armed = !REC.armed; REC.primed = false; REC.prev = {}; REC.low = [false, false]; recUI();
+    if (REC.armed && (!cur || performance.now() - lastFrameAt > 2000)) toast('Нет кадров от прибора — триггеры начнут проверяться, когда пойдут данные');
+  };
+  $('rcNow').onclick = () => { if (REC.ev) return toast('Запись уже идёт'); if (!REC.buf.length) return toast('Нет данных от прибора'); recStart('manual', REC.buf[REC.buf.length - 1].t); };
+  $('rcStop').onclick = () => { if (REC.ev) recFinish(); else { REC.armed = false; recUI(); } };
+  $('rcSave').onclick = () => recSave(REC.sel);
+  $('rcPos').oninput = e => { REC.pos = +e.target.value; REC.follow = false; needDraw = true; };
+  recUI();
+}
+
 // ---- wiring ----
 function initDrive() {
   buildSensors();
@@ -1730,7 +1938,7 @@ function initDrive() {
   segSet('rpCh', S.rpm.ch); segInit('rpCh', v => { S.rpm.ch = +v; RPM.t.length = RPM.v.length = 0; saveSettings(); needDraw = true; });
   bindNum('rpPpr', S.rpm, 'ppr'); bindNum('rpPoles', S.rpm, 'poles'); bindNum('rpFman', S.rpm, 'fman');
   $('rpFsrc').value = S.rpm.fsrc; $('rpFsrc').onchange = e => { S.rpm.fsrc = e.target.value; saveSettings(); needDraw = true; };
-  startUI();
+  startUI(); recInit();
   setInterval(trendPush, 30);
 }
 
@@ -1745,6 +1953,7 @@ document.addEventListener('contextmenu', e => { if (!e.target.closest('input,tex
   $('avgN').value = S.avg; $('smooth').value = String(S.smooth === true ? 1 : +S.smooth || 0); segSet('zeroMode', S.zeroDev ? 'dev' : 'man'); $('fill').checked = S.fill; $('persist').checked = S.persist;
   $$('#chShow button').forEach(b => b.classList.toggle('on', !!S.show[+b.dataset.v]));
   $('holdShort').value = S.holdShort; $('holdLong').value = S.holdLong;
+  $('yLab').checked = S.yLabels !== false; $('yLab').onchange = e => { S.yLabels = e.target.checked; saveSettings(); redrawAll(); };
   $('fpsSel').value = String(S.fps); if (!$('fpsSel').value) $('fpsSel').value = '33';
   $('fpsSel').onchange = e => { S.fps = +e.target.value; saveSettings(); if (cur && cur.ver >= 4 && performance.now() - lastFrameAt < 2000) sendFps(); };
   buildPads(); initDrive(); startEvents(); loop(); drawFile();

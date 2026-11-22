@@ -4,12 +4,17 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 )
 
 // Simulated device (for testing without hardware: run with --sim)
 var simMode bool
+
+// PUF_SIM_SCENARIO=sync: a 40 s cycle for testing the event recorder — CH2 (drive) is off for 5 s,
+// appears at 45 Hz, ramps to 50.05 Hz by 25 s and then holds close to the grid (CH1, 50 Hz).
+var simScenario = os.Getenv("PUF_SIM_SCENARIO")
 
 type simPort struct {
 	mu         sync.Mutex
@@ -27,7 +32,9 @@ type simPort struct {
 	scans      byte
 	phase      float64
 	mem        [][]byte
-	period     int // ms between frames, like the firmware 'P' command (default 33)
+	period     int       // ms between frames, like the firmware 'P' command (default 33)
+	theta      float64   // scenario: accumulated CH2 phase relative to 50 Hz
+	lastT      time.Time // scenario: previous frame time
 	bufA, bufB []byte
 }
 
@@ -106,6 +113,23 @@ func (s *simPort) frame() []byte {
 	dt := tdiv / 25
 	// free-running: random start phase each frame (like an untriggered scope)
 	s.phase = rand.Float64() * 2 * math.Pi
+	amp2, f2 := 1.0, 50.0
+	if simScenario == "sync" {
+		now := time.Now()
+		cyc := math.Mod(now.Sub(s.t0).Seconds(), 40)
+		switch {
+		case cyc < 5:
+			amp2 = 0
+		case cyc < 25:
+			f2 = 45 + 5.05*(cyc-5)/20
+		default:
+			f2 = 50.05
+		}
+		if !s.lastT.IsZero() {
+			s.theta += 2 * math.Pi * (f2 - 50) * now.Sub(s.lastT).Seconds()
+		}
+		s.lastT = now
+	}
 	f := []byte{'F', 'S', '5', '3', 4, s.seq}
 	s.seq++
 	ln := 8 + 128 + 602 + 16 + 8 + 2
@@ -133,6 +157,9 @@ func (s *simPort) frame() []byte {
 			} else {
 				drift := 2 * math.Pi * 0.05 * time.Since(s.t0).Seconds()
 				v = 0.95 * 2.0 * math.Sin(2*math.Pi*50*t+s.phase-drift*0+drift-0.3)
+				if simScenario == "sync" {
+					v = amp2 * 0.97 * 2.0 * math.Sin(2*math.Pi*f2*t+s.phase+s.theta)
+				}
 				if math.Sin(2*math.Pi*4000*t) > 0.6 { // PWM carrier ripple, like a PT on a drive output
 					v += 0.5
 				}
