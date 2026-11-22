@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -19,7 +20,7 @@ import (
 )
 
 const AppName = "PUFService"
-const AppVersion = "1.3.0"
+const AppVersion = "1.4.0"
 const AppID = "pufservice"
 const FixedPort = 53153
 
@@ -60,6 +61,12 @@ func (l *Link) status() map[string]any {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return map[string]any{"state": l.state, "port": l.name, "msg": l.msg, "auto": l.auto, "frames": l.frames, "bad": l.bad}
+}
+
+func (l *Link) countBad() {
+	l.mu.Lock()
+	l.bad++
+	l.mu.Unlock()
 }
 
 func (l *Link) setState(st, msg string) {
@@ -192,24 +199,27 @@ func (l *Link) reader(p Port) {
 			}
 			ln := int(buf[6]) | int(buf[7])<<8
 			if ln < 16 || ln > 4096 {
-				buf = buf[4:]
-				l.bad++
+				buf = append(buf[:0], buf[4:]...)
+				l.countBad()
 				continue
 			}
 			if len(buf) < ln {
 				break
 			}
+			var s uint16
+			for _, c := range buf[:ln-2] {
+				s += uint16(c)
+			}
+			if s != uint16(buf[ln-2])|uint16(buf[ln-1])<<8 {
+				// false header inside data or a damaged frame: skip only the signature,
+				// so a real frame that starts inside these ln bytes is not lost
+				buf = append(buf[:0], buf[4:]...)
+				l.countBad()
+				continue
+			}
 			f := make([]byte, ln)
 			copy(f, buf[:ln])
 			buf = append(buf[:0], buf[ln:]...)
-			var s uint16
-			for _, c := range f[:ln-2] {
-				s += uint16(c)
-			}
-			if s != uint16(f[ln-2])|uint16(f[ln-1])<<8 {
-				l.bad++
-				continue
-			}
 			if f[0] == 'M' {
 				hub.broadcast("mem", base64.StdEncoding.EncodeToString(f))
 				continue
@@ -521,6 +531,7 @@ func main() {
 	}
 	go link.run()
 
+	mime.AddExtensionType(".woff2", "font/woff2")
 	sub, _ := fs.Sub(webFS, "web")
 	mux := http.NewServeMux()
 	static := http.FileServer(http.FS(sub))
@@ -582,7 +593,7 @@ func main() {
 		go func() { time.Sleep(200 * time.Millisecond); os.Exit(0) }()
 	})
 
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{Handler: guard(ln.Addr().(*net.TCPAddr).Port, mux), ReadHeaderTimeout: 10 * time.Second}
 	go srv.Serve(ln)
 
 	if noWindow {
@@ -643,4 +654,31 @@ func scanCSV(dir string) *RecSource {
 	}
 	sort.Slice(src.Files, func(i, j int) bool { return src.Files[i].MTime > src.Files[j].MTime })
 	return src
+}
+
+// guard protects the local API from other web pages open in any browser on this PC:
+//   - Host must be our loopback address (blocks DNS rebinding);
+//   - a cross-site Origin is refused;
+//   - /api/* calls (except the read-only ping/events) must carry the X-PUF header,
+//     which a foreign page cannot add without a CORS preflight that we never answer.
+func guard(port int, h http.Handler) http.Handler {
+	hosts := map[string]bool{}
+	for _, n := range []string{"127.0.0.1", "localhost", "[::1]"} {
+		hosts[fmt.Sprintf("%s:%d", n, port)] = true
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hosts[strings.ToLower(r.Host)] {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		if o := r.Header.Get("Origin"); o != "" && !hosts[strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(o, "http://"), "https://"))] {
+			http.Error(w, "forbidden origin", http.StatusForbidden)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/ping" && r.URL.Path != "/api/events" && r.Header.Get("X-PUF") != "1" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }

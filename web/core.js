@@ -181,15 +181,19 @@ const SCOPE = (() => {
     const avg = s / n, rms = Math.sqrt(s2 / n);
     // frequency: rising crossings of mid level with hysteresis
     const mid = (mx + mn) / 2, hy = (mx - mn) * 0.1;
-    const rises = []; let st = v[0] > mid ? 1 : 0, high = 0;
+    // crossing time is interpolated between samples: on 301 points with 2–5 periods
+    // whole-sample timing alone gave ~0.3–1 % frequency error
+    const rises = [], rt = []; let st = v[0] > mid ? 1 : 0;
     for (let i = 1; i < n; i++) {
-      if (st === 0 && v[i] > mid + hy) { st = 1; let k = i; while (k > 0 && v[k - 1] > mid) k--; rises.push(k); }
+      if (st === 0 && v[i] > mid + hy) {
+        st = 1; let k = i; while (k > 0 && v[k - 1] > mid) k--; rises.push(k);
+        rt.push(k > 0 && v[k] !== v[k - 1] ? t[k - 1] + (mid - v[k - 1]) / (v[k] - v[k - 1]) * (t[k] - t[k - 1]) : t[k]);
+      }
       else if (st === 1 && v[i] < mid - hy) st = 0;
     }
-    for (let i = 0; i < n; i++) if (v[i] > mid) high++;
     let period = null, freq = null, duty = null;
     if (rises.length >= 2 && mx - mn > 0) {
-      period = (t[rises[rises.length - 1]] - t[rises[0]]) / (rises.length - 1);
+      period = (rt[rt.length - 1] - rt[0]) / (rt.length - 1);
       freq = period > 0 ? 1 / period : null;
       let h = 0; for (let i = rises[0]; i < rises[rises.length - 1]; i++) if (v[i] > mid) h++;
       duty = h / (rises[rises.length - 1] - rises[0]) * 100;

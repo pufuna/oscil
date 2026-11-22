@@ -12,27 +12,28 @@ import (
 var simMode bool
 
 type simPort struct {
-	mu     sync.Mutex
-	closed bool
-	out    []byte
-	seq    byte
-	t0     time.Time
-	g      [128]byte
-	sys    [16]byte
-	cmd    []byte
-	queue  [][2]byte
-	hold   int
-	key    int
-	latch  uint16
-	scans  byte
-	phase  float64
-	mem    [][]byte
+	mu         sync.Mutex
+	closed     bool
+	out        []byte
+	seq        byte
+	t0         time.Time
+	g          [128]byte
+	sys        [16]byte
+	cmd        []byte
+	queue      [][2]byte
+	hold       int
+	key        int
+	latch      uint16
+	scans      byte
+	phase      float64
+	mem        [][]byte
+	period     int // ms between frames, like the firmware 'P' command (default 33)
 	bufA, bufB []byte
 }
 
 func newSim() *simPort {
-	s := &simPort{t0: time.Now()}
-	s.g[0x2d] = 16 // 2 ms/div... index 16 = 2ms
+	s := &simPort{t0: time.Now(), period: 33}
+	s.g[0x2d] = 16        // 2 ms/div... index 16 = 2ms
 	s.g[6], s.g[2] = 2, 0 // CH1 index 6 = 1 V
 	s.g[7], s.g[3] = 2, 0 // CH2 1 V
 	s.g[0x14] = 3
@@ -41,7 +42,10 @@ func newSim() *simPort {
 }
 
 func (s *simPort) Read(p []byte) (int, error) {
-	time.Sleep(33 * time.Millisecond)
+	s.mu.Lock()
+	per := s.period
+	s.mu.Unlock()
+	time.Sleep(time.Duration(per) * time.Millisecond)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -196,7 +200,9 @@ func (s *simPort) Write(p []byte) (int, error) {
 			ad := uint32(s.cmd[2]) | uint32(s.cmd[3])<<8 | uint32(s.cmd[4])<<16 | uint32(s.cmd[5])<<24
 			n := int(s.cmd[6]) | int(s.cmd[7])<<8
 			s.cmd = s.cmd[8:]
-			s.mem = append(s.mem, s.memFrame(ad, n))
+			if len(s.mem) == 0 && n >= 1 && n <= 2048 { // the firmware keeps one pending read and drops the rest
+				s.mem = append(s.mem, s.memFrame(ad, n))
+			}
 			continue
 		}
 		c, a, b := s.cmd[1], s.cmd[2], s.cmd[3]
@@ -208,6 +214,10 @@ func (s *simPort) Write(p []byte) (int, error) {
 			}
 		case 'X':
 			s.queue = nil
+		case 'P':
+			if a >= 10 {
+				s.period = int(a)
+			}
 		}
 	}
 	return len(p), nil
@@ -229,7 +239,9 @@ func (s *simPort) press(bit int) {
 
 var simDev *simPort
 
-func simList() []PortInfo { return []PortInfo{{Name: "SIM", Device: true, Desc: "Имитатор прибора"}} }
+func simList() []PortInfo {
+	return []PortInfo{{Name: "SIM", Device: true, Desc: "Имитатор прибора"}}
+}
 func simOpen() (Port, error) {
 	simDev = newSim()
 	return simDev, nil

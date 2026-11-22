@@ -36,5 +36,5 @@ func openWindow(url string) <-chan struct{} {
 	return make(chan struct{}) // never closes
 }
 func openFolder(p string) {}
-func fatal(msg string)      { fmt.Fprintln(os.Stderr, msg); os.Exit(1) }
-func osName() string        { return "dev" }
+func fatal(msg string)    { fmt.Fprintln(os.Stderr, msg); os.Exit(1) }
+func osName() string      { return "dev" }

@@ -27,7 +27,7 @@
   <div class="conn" id="conn" title="Состояние связи"><i class="dot"></i><span id="connText">поиск прибора…</span></div>
   <button class="ibtn" id="bPort" title="Выбор порта"><svg viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0zM12 17v4"/></svg></button>
   <button class="ibtn" id="bTheme" title="Светлая / тёмная тема"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg></button>
-  <span class="ver" id="ver">v1.3.0</span>
+  <span class="ver" id="ver">v1.4.0</span>
 </header>
 
 <div class="body">
@@ -176,6 +176,7 @@
           <div class="card">
             <div class="ch"><b>Связь</b></div>
             <div class="kv" id="linkKv"></div>
+            <div class="row"><span>Частота кадров</span><select id="fpsSel" title="Как часто прибор присылает кадр по USB (команда прошивки RU_USB4). Чаще — плавнее лента, пуск и обороты; экран самого прибора от этого не ускоряется"><option value="33">30 кадр/с (как в прошивке)</option><option value="20">50 кадр/с</option><option value="16">60 кадр/с</option><option value="10">100 кадр/с</option></select></div>
           </div>
           <div class="card">
             <div class="ch"><b>Кнопки по номерам</b></div>
@@ -201,6 +202,7 @@
             <li><b>Шунт 1 мОм</b>: 1 мВ = 1 А (коэффициент 1000).</li>
             <li>Настройку щупа ×1/×10 в самом приборе по-прежнему выставляйте на приборе — коэффициент здесь умножается сверху.</li>
           </ul>
+          <div class="stinfo warn gnd">⚠ У 2C53T минусы (земли) CH1 и CH2 соединены между собой, а при подключённом USB — ещё и с землёй компьютера. К сети подключайтесь только через изолирующие датчики (ТН, токовые клещи, дифференциальный пробник), оба минуса — на одну общую точку. Минус щупа на фазу не подключать: это короткое замыкание через прибор и ПК.</div>
         </div>
       </div>
     </section>
@@ -227,6 +229,7 @@
             <div class="row"><span>Допуск ΔU</span><input type="number" id="syTolU" step="0.5" min="0.5"><span class="u">%</span></div>
             <div class="row"><span>Поправка угла</span><input type="number" id="syOff" step="1"><span class="u" title="если на CH1 и CH2 разные пары фаз, например Uab и Ua — поправка 30°">°</span></div>
             <div class="stinfo" id="syncNote">—</div>
+            <div class="stinfo warn gnd">⚠ У 2C53T минусы (земли) CH1 и CH2 соединены между собой, а при подключённом USB — ещё и с землёй компьютера. К сети подключайтесь только через изолирующие датчики (ТН, токовые клещи, дифференциальный пробник), оба минуса — на одну общую точку. Минус щупа на фазу не подключать: это короткое замыкание через прибор и ПК.</div>
           </div>
         </div>
       </div>
@@ -251,6 +254,7 @@
             <div class="row"><span>Сеть</span><select id="pwMult"><option value="1">однофазная</option><option value="3">3 фазы, симметричная (U фазное)</option></select></div>
             <div class="row"><span>Инвертировать ток</span><label class="sw"><input type="checkbox" id="pwInv"><i></i></label></div>
             <div class="stinfo" id="pwNote">—</div>
+            <div class="stinfo warn gnd">⚠ У 2C53T минусы (земли) CH1 и CH2 соединены между собой, а при подключённом USB — ещё и с землёй компьютера. К сети подключайтесь только через изолирующие датчики (ТН, токовые клещи, дифференциальный пробник), оба минуса — на одну общую точку. Минус щупа на фазу не подключать: это короткое замыкание через прибор и ПК.</div>
           </div>
         </div>
       </div>
@@ -373,7 +377,7 @@
     <section class="view" id="v-about">
       <div class="card about">
         <svg class="logo big" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="var(--teal)"/><path d="M5 18h4l3-9 4 15 3-11 2 5h6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="26" cy="18" r="2.2" fill="var(--orange)"/></svg>
-        <h2>PUFService <span class="ver" id="ver2">v1.3.0</span></h2>
+        <h2>PUFService <span class="ver" id="ver2">v1.4.0</span></h2>
         <p>Программа для работы с осциллографом FNIRSI 2C53T с доработанной прошивкой <b>RU_USB4</b>: просмотр сигнала в реальном времени, программная стабилизация, удалённое управление кнопками и просмотр сохранённых осциллограмм.</p>
         <ul>
           <li>Онлайн-режим работает, когда прибор подключён кабелем и находится в режиме осциллографа.</li>

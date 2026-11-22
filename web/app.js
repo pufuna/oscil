@@ -18,7 +18,8 @@ const fmtT = x => si(x, 'с', 3), fmtV = x => si(x, 'В', 3);
 const tdivName = t => si(t, 'с', 3) + '/дел', vdivName = v => si(v, 'В', 3) + '/дел';
 const UN = c => (S.sens && S.sens[c] && S.sens[c].unit) || 'В';
 const KS = c => { const k = S.sens && S.sens[c] && +S.sens[c].k; return k && isFinite(k) ? k : 1; };
-const chName = c => 'CH' + (c + 1) + (S.sens && S.sens[c] && S.sens[c].name ? ' · ' + S.sens[c].name : '');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const chName = c => 'CH' + (c + 1) + (S.sens && S.sens[c] && S.sens[c].name ? ' · ' + esc(S.sens[c].name) : '');
 const fmtC = (c, x, d = 3) => si(x, UN(c), d), vdivNameC = (c, v) => si(v, UN(c), 3) + '/дел';
 
 let toastT;
@@ -27,7 +28,7 @@ function toast(msg, action) {
   if (action) { const a = document.createElement('a'); a.textContent = action[0]; a.onclick = action[1]; t.append(a); }
   t.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', 4500);
 }
-const api = (p, o) => fetch(p, o).then(r => { if (!r.ok) throw new Error(r.statusText); return r; });
+const api = (p, o = {}) => fetch(p, Object.assign({}, o, { headers: Object.assign({ 'X-PUF': '1' }, o.headers) })).then(r => { if (!r.ok) throw new Error(r.statusText); return r; });
 const b64 = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
 const unb64 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
 async function saveOut(name, u8) {
@@ -43,7 +44,7 @@ const num = (x, d = 6) => x == null || !isFinite(x) ? '' : (+x.toPrecision(d)).t
 // ---------------- settings ----------------
 const S = { theme: 'light', keys: {}, holdShort: 6, holdLong: 90, tbDir: 1, st: { on: true, src: 'a', edge: 1, lvl: 'auto', level: 128, pos: 150 }, avg: 4, smooth: 0, zeroDev: true, sens: [{ k: 1, unit: 'В', name: '', preset: 'v1' }, { k: 1, unit: 'В', name: '', preset: 'v1' }],
   sync: { tolF: 0.1, tolPhi: 10, tolU: 5, offset: 0 }, power: { inv: false, mult: 1 }, start: { ch: 1, thr: 0, nom: 0, pre: 3, auto: true },
-  pwm: { ch: 0 }, rpm: { ch: 1, ppr: 1, poles: 2, fsrc: 'ch', fman: 50 }, fill: true, persist: false, show: [1, 1], zero: [0, 0] };
+  fps: 33, pwm: { ch: 0 }, rpm: { ch: 1, ppr: 1, poles: 2, fsrc: 'ch', fman: 50 }, fill: true, persist: false, show: [1, 1], zero: [0, 0] };
 let saveT;
 function saveSettings() { clearTimeout(saveT); saveT = setTimeout(() => api('/api/settings', { method: 'POST', body: JSON.stringify(S) }).catch(() => {}), 400); }
 async function loadSettings() {
@@ -51,7 +52,7 @@ async function loadSettings() {
 }
 
 // ---------------- theme / mode / nav ----------------
-function applyTheme() { document.documentElement.dataset.theme = S.theme; }
+function applyTheme() { document.documentElement.dataset.theme = S.theme; cssCache.clear(); }
 $('bTheme').onclick = () => { S.theme = S.theme === 'dark' ? 'light' : 'dark'; applyTheme(); saveSettings(); redrawAll(); };
 let mode = 'live', view = 'scope';
 const lastView = { live: 'scope', files: 'files' };
@@ -127,8 +128,13 @@ function parseFrame(f) {
 }
 const prevG = new Uint8Array(128), chgG = new Float64Array(128), prevS = new Uint8Array(16), chgS = new Float64Array(16);
 let scanRate = null, scanRef = null;
+// frame period for the firmware 'P' command (ms, ≥10); re-sent after every reconnect, the device forgets it on power-off
+let fpsApplied = false;
+function sendFps() { const ms = Math.max(10, Math.min(250, Math.round(+S.fps || 33))); send([0xA5, 0x50, ms, 0]); }
 function onFrame(f) {
   const fr = parseFrame(f), now = performance.now();
+  if (now - lastFrameAt > 2000) fpsApplied = false;
+  if (!fpsApplied && fr.ver >= 4) { fpsApplied = true; sendFps(); }
   if (lastSeq >= 0 && ((lastSeq + 1) & 255) !== fr.seq) lost += (fr.seq - lastSeq - 1 + 256) & 255;
   lastSeq = fr.seq; frames++; fpsN++; lastFrameAt = now;
   if (now - fpsT > 1000) { fps = fpsN * 1000 / (now - fpsT); fpsN = 0; fpsT = now; }
@@ -145,7 +151,7 @@ function onFrame(f) {
   if (!prev || fr.raw[0].some((v, i) => v !== prev.raw[0][i]) || fr.raw[1].some((v, i) => v !== prev.raw[1][i])) lastTraceChange = now;
   if (prev && prev.tIdx !== fr.tIdx) onTbChange(prev.tIdx, fr.tIdx);
   if (recording) { recording.push(fr); $('bRec').lastChild.textContent = `Стоп (${recording.length})`; }
-  TAPE.push(fr, [zeroRaw(0), zeroRaw(1)], Date.now() / 1000);
+  TAPE.push(fr, [zeroRaw(0), zeroRaw(1)], Date.now() / 1000, (+S.fps || 33) / 1000);
   if (!frozen) process(fr);
   needDraw = true;
 }
@@ -236,7 +242,9 @@ function lvlText(rawL, c) { const vd = cur && cur.vdiv[c]; const v = (rawL - zer
 // data: { n, y:[Float32Array raw-scale values], v0:[raw zero], on:[bool], vdiv:[], tdiv, trigX (samples), trigL (raw|null), title }
 const views = {};   // per canvas: zoom & cursors
 function getView(id) { return views[id] || (views[id] = { t0: 0, t1: 12, cur: 'off', ta: 3, tb: 9, va: 1.5, vb: -1.5, drag: null }); }
-function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+// theme colours are read once per theme: getComputedStyle on every grid line was a noticeable part of a frame
+const cssCache = new Map();
+function cssVar(n) { let v = cssCache.get(n); if (v == null) { v = getComputedStyle(document.documentElement).getPropertyValue(n).trim(); cssCache.set(n, v); } return v; }
 function geom(cv, compact) {
   const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
   if (!W || !H) return null;
@@ -538,7 +546,7 @@ function toggleFreeze() {
 $('bFreeze').onclick = toggleFreeze;
 addEventListener('keydown', e => { if (e.code === 'Space' && mode === 'live' && view === 'scope' && !/INPUT|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); toggleFreeze(); } });
 function canvasPNG(cv) { const d = atob(cv.toDataURL('image/png').split(',')[1]); const u = new Uint8Array(d.length); for (let i = 0; i < d.length; i++) u[i] = d.charCodeAt(i); return u; }
-$('bShot').onclick = () => { if (liveKind === 'spec') return saveOut(`PUF_spectrum_${stamp()}.png`, canvasPNG($('specPlot'))); if (liveKind === 'tape') return saveOut(`PUF_tape_${stamp()}.png`, canvasPNG($('tapePlot'))); if (!proc) return toast('Нет данных'); saveOut(`PUF_${stamp()}.png`, canvasPNG($('livePlot'))); };
+$('bShot').onclick = () => { if (liveKind === 'deep') { if (!deep.buf[0] && !deep.buf[1]) return toast('Нет полной записи'); return saveOut(`PUF_full_${stamp()}.png`, canvasPNG($('deepPlot'))); } if (liveKind === 'spec') return saveOut(`PUF_spectrum_${stamp()}.png`, canvasPNG($('specPlot'))); if (liveKind === 'tape') return saveOut(`PUF_tape_${stamp()}.png`, canvasPNG($('tapePlot'))); if (!proc) return toast('Нет данных'); saveOut(`PUF_${stamp()}.png`, canvasPNG($('livePlot'))); };
 function csvFrames(list, processed) {
   const lines = [`﻿кадр;время, с;CH1, ${UN(0)};CH2, ${UN(1)};развёртка, с/дел;CH1 ${UN(0)}/дел;CH2 ${UN(1)}/дел`];
   list.forEach((fr, k) => {
@@ -553,7 +561,9 @@ function csvFrames(list, processed) {
 }
 $('bCsv').onclick = () => {
   if (liveKind === 'spec') { const sp = specCache; if (!sp) return toast('Нет спектра'); const L = ['\ufeffчастота, Гц;СКЗ, В']; for (let k = 1; k <= sp.K; k++) L.push(num(k * sp.df) + ';' + num(sp.amp[k])); L.push('', 'гармоника;частота, Гц;СКЗ, В;% от 1-й'); sp.h.forEach(q => L.push([q.n, num(q.f), num(q.a), num(q.a / sp.h[0].a * 100, 4)].join(';'))); return saveOut(`PUF_spectrum_${stamp()}.csv`, utf8(L.join('\r\n'))); }
-  if (liveKind === 'tape') { if (!TAPE.T.len) return toast('Лента пуста'); return saveOut(`PUF_tape_${stamp()}.csv`, tapeCSV()); } if (!proc) return toast('Нет данных'); saveOut(`PUF_${stamp()}.csv`, csvFrames([proc.fr], proc.y)); };
+  if (liveKind === 'tape') { if (!TAPE.T.len) return toast('Лента пуста'); return saveOut(`PUF_tape_${stamp()}.csv`, tapeCSV()); }
+  if (liveKind === 'deep') { const u = deepCSV(); if (!u) return toast('Нет полной записи'); return saveOut(`PUF_full_${stamp()}.csv`, u); }
+  if (!proc) return toast('Нет данных'); saveOut(`PUF_${stamp()}.csv`, csvFrames([proc.fr], proc.y)); };
 let recording = null;
 $('bRec').onclick = () => {
   if (!recording) { if (!cur) return toast('Нет данных'); recording = []; $('bRec').classList.add('on'); $('bRec').lastChild.textContent = 'Стоп (0)'; return; }
@@ -688,6 +698,19 @@ function drawTapeView() {
   cv.addEventListener('dblclick', () => { tv.end = null; tv.span = 3 * N; needDraw = true; });
   cv.style.cursor = 'grab';
 })();
+// full capture memory (1024 points) → CSV; CH2 is resampled onto the CH1 time grid if their strides differ
+function deepCSV() {
+  const d = deepData(); if (!d || d.empty) return null;
+  const ref = d.on[0] ? 0 : 1, xs = d.xs[ref], tr = d.trigX;
+  const at = (c, u) => { const x = d.xs[c], y = d.y[c]; if (!(u >= x[1] && u <= x[DEEP_N - 1])) return NaN; let lo = 1, hi = DEEP_N - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (x[m] < u) lo = m; else hi = m; } const f = (u - x[lo]) / ((x[hi] - x[lo]) || 1); return y[lo] + (y[hi] - y[lo]) * f; };
+  const L = [`\ufeffвремя, с;CH1, ${UN(0)};CH2, ${UN(1)}`];
+  for (let i = 1; i < DEEP_N; i++) {
+    const u = xs[i], t = d.tdiv ? (u - tr) * d.tdiv / PXDIV : u;
+    const v = c => { if (!d.on[c]) return ''; const r = c === ref ? d.y[c][i] : at(c, u); return isNaN(r) ? '' : num((r - d.v0[c]) / PXDIV * (d.vdiv[c] || 1)); };
+    L.push([num(t, 9), v(0), v(1)].join(';'));
+  }
+  return utf8(L.join('\r\n'));
+}
 function tapeCSV() {
   const T = TAPE.T, R = tapeRange(), lo = Math.max(0, Math.floor(R.a)), hi = Math.min(T.len, Math.ceil(R.b));
   const lines = [`﻿время от начала, с;CH1, ${UN(0)};CH2, ${UN(1)};разрыв`];
@@ -702,10 +725,13 @@ function tapeCSV() {
 const DEEP_A = 0x200006A8, DEEP_B = 0x20000AA8, DEEP_N = 1024;
 const deep = { buf: [null, null], cal: [null, null], t: 0, waiting: 0, next: 0, view: null };
 function deepWanted() { return mode === 'live' && ((view === 'scope' && (liveKind === 'deep' || liveKind === 'spec')) || ['sync', 'power', 'pwm', 'rpm'].includes(view)) && cur && cur.ver >= 3 && performance.now() - lastFrameAt < 2000; }
+let memQueued = null, memSent = 0;   // manual reads (diagnostics) share the single firmware read slot with the deep reader
 function deepTick() {
-  if (!deepWanted()) return;
   const now = performance.now();
+  if (memQueued && !(deep.waiting && now - deep.waiting < 600)) { const c = memQueued; memQueued = null; memSent = now; send(c); return; }
+  if (!deepWanted() || (frozen && view === 'scope')) return;   // «Пауза» also stops the full record and the spectrum
   if (deep.waiting && now - deep.waiting < 600) return;
+  if (memSent && now - memSent < 600) return;
   if (now < deep.next) return;
   deep.waiting = now;
   const a = cur.ver >= 4 ? DEEP_A : (deep.ask === DEEP_A ? DEEP_B : DEEP_A), n = cur.ver >= 4 ? 2 * DEEP_N : DEEP_N;
@@ -820,9 +846,10 @@ function spectrumOf(y, v0, vdiv, dt) {
   for (let i = 0; i < n; i++) { x[i] = (y[bs + i] - v0) / PXDIV * (vdiv || 1); mean += x[i]; }
   mean /= n;
   for (let i = 0; i < n; i++) { const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)); x[i] = (x[i] - mean) * w; wsum += w; }
-  if (!dftTab) { dftTab = { c: new Float64Array(DFT_M), s: new Float64Array(DFT_M) }; for (let k = 0; k < DFT_M; k++) { dftTab.c[k] = Math.cos(2 * Math.PI * k / DFT_M); dftTab.s[k] = Math.sin(2 * Math.PI * k / DFT_M); } }
-  const K = DFT_M / 2, amp = new Float64Array(K + 1);
-  for (let k = 1; k <= K; k++) { let re = 0, im = 0; for (let i = 0, idx = 0; i < n; i++, idx = (idx + k) & (DFT_M - 1)) { re += x[i] * dftTab.c[idx]; im -= x[i] * dftTab.s[idx]; } amp[k] = 2 * Math.hypot(re, im) / wsum / Math.SQRT2; }
+  // zero-padded radix-2 FFT: same bins as the former direct DFT, ~40× less work per redraw
+  const K = DFT_M / 2, amp = new Float64Array(K + 1), re = new Float64Array(DFT_M), im = new Float64Array(DFT_M);
+  re.set(n > DFT_M ? x.subarray(0, DFT_M) : x); fft(re, im);
+  for (let k = 1; k <= K; k++) amp[k] = 2 * Math.hypot(re[k], im[k]) / wsum / Math.SQRT2;
   const fs = 1 / dt, df = fs / DFT_M, natBin = DFT_M / n;   // padded bins per native bin
   // fundamental: biggest peak above ~1.5 native bins
   let k1 = 0; for (let k = Math.ceil(1.5 * natBin); k <= K; k++) if (amp[k] > amp[k1]) k1 = k;
@@ -841,6 +868,19 @@ function spectrumOf(y, v0, vdiv, dt) {
   res.periods = res.f1 * n * dt;
   return res;
 }
+function fft(re, im) {   // in place, length = DFT_M
+  const M = re.length;
+  if (!dftTab) { dftTab = { c: new Float64Array(M / 2), s: new Float64Array(M / 2) }; for (let k = 0; k < M / 2; k++) { dftTab.c[k] = Math.cos(2 * Math.PI * k / M); dftTab.s[k] = Math.sin(2 * Math.PI * k / M); } }
+  for (let i = 1, j = 0; i < M; i++) { let b = M >> 1; for (; j & b; b >>= 1) j ^= b; j ^= b; if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+  for (let len = 2; len <= M; len <<= 1) {
+    const h = len >> 1, step = M / len;
+    for (let i = 0; i < M; i += len) for (let k = 0; k < h; k++) {
+      const c = dftTab.c[k * step], s = dftTab.s[k * step], a = i + k, b = a + h;
+      const tr = re[b] * c + im[b] * s, ti = im[b] * c - re[b] * s;   // × e^{-j2πk/len}
+      re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+    }
+  }
+}
 let specCache = null;
 function drawSpecView() {
   const cv = $('specPlot'), g = geom(cv); if (!g) return;
@@ -851,7 +891,7 @@ function drawSpecView() {
   let deepUsed = false;
   if (fr && fr.tdiv && (fr.mask & (1 << c))) {
     const cal = deep.cal[c], b = deep.buf[c];
-    if (cal && b && performance.now() - deep.t < 1500 && cal.tIdx === fr.tIdx) { const y = new Float32Array(DEEP_N - 1); for (let i = 1; i < DEEP_N; i++) y[i - 1] = cal.a * b[i] + cal.b; sp = spectrumOf(y, zeroRaw(c), fr.vdiv[c], fr.tdiv / PXDIV / cal.s); deepUsed = true; }
+    if (cal && b && (frozen || performance.now() - deep.t < 1500) && cal.tIdx === fr.tIdx) { const y = new Float32Array(DEEP_N - 1); for (let i = 1; i < DEEP_N; i++) y[i - 1] = cal.a * b[i] + cal.b; sp = spectrumOf(y, zeroRaw(c), fr.vdiv[c], fr.tdiv / PXDIV / cal.s); deepUsed = true; }
     else sp = spectrumOf(+S.smooth ? Float32Array.from(fr.raw[c]) : proc.y[c], zeroRaw(c), fr.vdiv[c], fr.tdiv / PXDIV);   // the filter would eat harmonics
     let clip = 0; for (const v of fr.raw[c]) if (v <= 28 || v >= 228) clip++; if (sp) sp.clip = clip;
   }
@@ -1023,9 +1063,9 @@ function onTbChange(from, to) {
 function tbSeekStep() {
   if (!tbSeek || !cur) return;
   if (cur.tIdx === tbSeek.target) { tbSeek = null; return; }
-  if (++tbSeek.steps > 40) { tbSeek = null; return toast('Не удалось выставить развёртку'); }
+  if (++tbSeek.steps > 40) { tbSeek = null; send([0xA5, 0x58, 0, 0]); return toast('Не удалось выставить развёртку'); }
   tbStep(Math.sign(tbSeek.target - cur.tIdx));
-  clearTimeout(tbSeek.to); tbSeek.to = setTimeout(() => { if (tbSeek) { if (++tbSeek.miss >= 2) { tbSeek = null; toast('Прибор не меняет развёртку стрелками. Выйдите из меню (MENU), выберите режим, где стрелки ←/→ меняют время/дел.'); } else tbSeekStep(); } }, 1200);
+  clearTimeout(tbSeek.to); tbSeek.to = setTimeout(() => { if (tbSeek) { if (++tbSeek.miss >= 2) { tbSeek = null; send([0xA5, 0x58, 0, 0]); toast('Прибор не меняет развёртку стрелками. Выйдите из меню (MENU), выберите режим, где стрелки ←/→ меняют время/дел.'); } else tbSeekStep(); } }, 1200);
 }
 $('tbSel').innerHTML = TDIV.map((t, i) => `<option value="${i}">${tdivName(t)}</option>`).join('');
 $('tbSel').onchange = e => { if (!cur || !fwOK()) return; tbSeek = { target: +e.target.value, steps: 0, miss: 0 }; tbSeekStep(); };
@@ -1060,13 +1100,16 @@ function memRequest() {
   if (!cur || cur.ver < 3) { $('memInfo').textContent = 'нужна прошивка RU_USB4'; return; }
   const a = parseInt($('memAddr').value.replace(/^0x/i, ''), 16) >>> 0, n = Math.max(1, Math.min(1024, +$('memLen').value || 0));
   if (!isFinite(a)) return toast('Неверный адрес');
-  send([0xA5, 0x4D, a & 255, (a >>> 8) & 255, (a >>> 16) & 255, (a >>> 24) & 255, n & 255, n >> 8]);
+  const cmd = [0xA5, 0x4D, a & 255, (a >>> 8) & 255, (a >>> 16) & 255, (a >>> 24) & 255, n & 255, n >> 8];
+  if (deep.waiting && performance.now() - deep.waiting < 600) { memQueued = cmd; return; }   // the device would drop a second pending read
+  memSent = performance.now(); send(cmd);
 }
 $('memRead').onclick = memRequest;
 $('memAuto').onchange = e => { clearInterval(memTimer); if (e.target.checked) memTimer = setInterval(() => { if (view === 'diag') memRequest(); }, 200); };
 function onMem(f) {
   const a = (f[8] | (f[9] << 8) | (f[10] << 16) | (f[11] << 24)) >>> 0, data = f.slice(12, f.length - 2);
   if (deep.waiting && (a === DEEP_A || a === DEEP_B) && a === deep.ask) { onDeepMem(a, data); if (!(view === 'diag' && $('memAuto').checked)) return; }
+  memSent = 0;
   const prev = memLast && memLast.a === a ? memLast.data : null;
   memLast = { a, data, prev, t: Date.now() };
   $('memInfo').textContent = `0x${a.toString(16).toUpperCase()} · ${data.length} байт · ${new Date().toLocaleTimeString('ru-RU')}`;
@@ -1096,7 +1139,7 @@ $('bPort').onclick = async () => {
   try {
     const ps = await (await api('/api/ports')).json();
     l.innerHTML = ps.length ? '' : '<div class="hint">COM-порты не найдены</div>';
-    ps.forEach(p => { const b = document.createElement('button'); b.innerHTML = `<span>${p.name}</span>${p.device ? '<em>2C53T</em>' : ''}`; b.onclick = () => { api('/api/connect?port=' + encodeURIComponent(p.name)); $('portModal').hidden = true; }; l.append(b); });
+    ps.forEach(p => { const b = document.createElement('button'); b.innerHTML = `<span>${esc(p.name)}</span>${p.device ? '<em>2C53T</em>' : ''}`; b.onclick = () => { api('/api/connect?port=' + encodeURIComponent(p.name)); $('portModal').hidden = true; }; l.append(b); });
   } catch (e) { l.innerHTML = '<div class="hint">ошибка</div>'; }
 };
 $('pAuto').onclick = () => { api('/api/connect'); $('portModal').hidden = true; };
@@ -1123,7 +1166,7 @@ function renderFileList() {
       const d = document.createElement('div'); d.className = 'fi' + (sel && sel.key === it.key ? ' on' : '');
       const th = document.createElement('img'); th.className = 'th'; d.append(th);
       if (it.csv) th.src = 'icons/csv.svg';
-      d.insertAdjacentHTML('beforeend', `<div class="fn"><b>${it.csv ? it.name : '№ ' + it.name}</b><span>${[it.bin ? 'данные' : '', it.bmp ? 'снимок' : '', it.csv ? 'CSV' + (it.size ? ' · ' + Math.max(1, Math.round(it.size / 1024)) + ' КБ' : '') : ''].filter(Boolean).join(' + ')}${it.mtime ? ' · ' + new Date(it.mtime * 1000).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span></div>`);
+      d.insertAdjacentHTML('beforeend', `<div class="fn"><b>${esc(it.csv ? it.name : '№ ' + it.name)}</b><span>${[it.bin ? 'данные' : '', it.bmp ? 'снимок' : '', it.csv ? 'CSV' + (it.size ? ' · ' + Math.max(1, Math.round(it.size / 1024)) + ' КБ' : '') : ''].filter(Boolean).join(' + ')}${it.mtime ? ' · ' + new Date(it.mtime * 1000).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span></div>`);
       d.onclick = () => openRec(it);
       l.append(d);
       if (it.bmp) thumb(it).then(u => { if (u) th.src = u; });
@@ -1267,12 +1310,12 @@ function drawFile() {
   cv._g = drawScope(cv, data);
   const sh = fileData && fileData.shot;
   $('fileChips').innerHTML = fileData && fileData.csv ? [
-    `<span class="chip"><b>${fileData.it.name}</b></span>`,
+    `<span class="chip"><b>${esc(fileData.it.name)}</b></span>`,
     `<span class="chip">${data.n.toLocaleString('ru-RU')} точек · ${fmtT(data.csvFrame.t[data.n - 1] - data.csvFrame.t[0])}</span>`,
     data.on[0] ? `<span class="chip c1">CH1 <b>${vdivNameC(0, data.vdiv[0])}</b></span>` : '',
     data.on[1] ? `<span class="chip c2">CH2 <b>${vdivNameC(1, data.vdiv[1])}</b></span>` : '',
   ].join('') : fileData ? [
-    `<span class="chip">№ <b>${fileData.it.name}</b></span>`,
+    `<span class="chip">№ <b>${esc(fileData.it.name)}</b></span>`,
     `<span class="chip">Развёртка <b>${data && data.tdiv ? tdivName(data.tdiv) : '?'}</b></span>`,
     data && data.on[0] ? `<span class="chip c1">CH1 <b>${data.vdiv[0] ? vdivNameC(0, data.vdiv[0]) : '?'}</b>${sh.ch[0].coupling ? ' · ' + sh.ch[0].coupling : ''}${sh.ch[0].probe ? ' · ' + sh.ch[0].probe : ''}</span>` : '',
     data && data.on[1] ? `<span class="chip c2">CH2 <b>${data.vdiv[1] ? vdivNameC(1, data.vdiv[1]) : '?'}</b>${sh.ch[1].coupling ? ' · ' + sh.ch[1].coupling : ''}${sh.ch[1].probe ? ' · ' + sh.ch[1].probe : ''}</span>` : '',
@@ -1281,8 +1324,9 @@ function drawFile() {
   $('fWarn').textContent = fileData ? fileData.warn.join(' · ') : '';
   $('fCurOut').innerHTML = cursorText(getView('filePlot'), data);
 }
-attachPlotMouse($('filePlot'), fileView, () => drawFile());
-hoverable($('filePlot'), () => drawFile());
+let fileRaf = 0; const drawFileSoon = () => { if (!fileRaf) fileRaf = requestAnimationFrame(() => { fileRaf = 0; drawFile(); }); };   // mousemove over a long CSV used to recompute everything per event
+attachPlotMouse($('filePlot'), fileView, drawFileSoon);
+hoverable($('filePlot'), drawFileSoon);
 $('fPng').onclick = () => { if (!fileData) return; saveOut(`PUF_${fileData.it.name}.png`, canvasPNG($('filePlot'))); };
 $('fCsv').onclick = () => {
   const d = fileView(); if (!d) return toast('Нет данных .bin');
@@ -1375,7 +1419,7 @@ function phaseBA(crA, crB, P) {   // + = B lags A, degrees
 const wrap180 = d => ((d % 360) + 540) % 360 - 180;
 function harmonicsOf(t, v, f1, a, b, kmax) {   // rectangular window over whole periods → exact for steady signals
   const out = []; const n = b - a; if (n < 8 || !f1) return out;
-  for (let k = 1; k <= kmax; k++) { let re = 0, im = 0; const w = 2 * Math.PI * k * f1; for (let i = a; i < b; i++) { re += v[i] * Math.cos(w * t[i]); im -= v[i] * Math.sin(w * t[i]); } out.push({ k, rms: 2 * Math.hypot(re, im) / n / Math.SQRT2 }); }
+  for (let k = 1; k <= kmax; k++) { let re = 0, im = 0; const w = 2 * Math.PI * k * f1; for (let i = a; i < b; i++) { re += v[i] * Math.cos(w * t[i]); im -= v[i] * Math.sin(w * t[i]); } out.push({ k, rms: 2 * Math.hypot(re, im) / n / Math.SQRT2, ph: Math.atan2(im, re) }); }
   return out;
 }
 const tile = (label, val, sub = '', cls = '') => `<div class="tile ${cls}"><span>${label}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
@@ -1391,11 +1435,12 @@ const syncHist = []; let syncKey = '';
 function syncCompute(sg) {
   if (!sg || !sg.ch[0].on || !sg.ch[1].on) return null;
   const A = sg.ch[0], B = sg.ch[1];
-  const ra = risingT(A.t, lpf(A.t, A.v), 0.5, 0.2), rb = risingT(B.t, lpf(B.t, B.v), 0.5, 0.2);
+  const fa = lpf(A.t, A.v), fb = lpf(B.t, B.v);
+  const ra = risingT(A.t, fa, 0.5, 0.2), rb = risingT(B.t, fb, 0.5, 0.2);
   const f1 = freqOf(ra.cr), f2 = freqOf(rb.cr);
   if (!f1 || !rb.cr.length) return { err: 'на экране меньше двух периодов — сделайте развёртку медленнее (5–10 мс/дел)' };
   const phi = phaseBA(ra.cr, rb.cr, 1 / f1);
-  const fa = lpf(A.t, A.v), fb = lpf(B.t, B.v), sa = winStats(A.t, fa, ra.cr), sb = winStats(B.t, fb, rb.cr);   // RMS of the fundamental-ish signal, not of PWM spikes
+  const sa = winStats(A.t, fa, ra.cr), sb = winStats(B.t, fb, rb.cr);   // RMS of the fundamental-ish signal, not of PWM spikes
   const lead = wrap180(-phi - (+S.sync.offset || 0));    // + = CH2 (drive) ahead of CH1 (grid)
   return { f1, f2, lead, u1: sa.rms, u2: sb.rms };
 }
@@ -1472,18 +1517,23 @@ function drawPower() {
   const w = winStats(U.t, U.v, ru.cr); if (!w) return;
   let p = 0, i2 = 0, u2 = 0, n = 0; for (let k = w.a; k < w.b; k++) { p += U.v[k] * iv[k]; u2 += U.v[k] ** 2; i2 += iv[k] ** 2; n++; }
   p /= n; const Ur = Math.sqrt(u2 / n), Ir = Math.sqrt(i2 / n), Sva = Ur * Ir;
-  const phi = f ? phaseBA(ru.cr, ri.cr, 1 / f) : null;   // + = current lags (inductive)
-  const Q = Math.sign(phi || 0) * Math.sqrt(Math.max(0, Sva * Sva - p * p)), pf = Sva ? p / Sva : null;
+  const phiX = f ? phaseBA(ru.cr, ri.cr, 1 / f) : null;   // + = current lags (inductive), by zero crossings
   const kmax = f ? Math.max(1, Math.min(25, Math.floor(1 / (2 * U.dt) / f) - 1)) : 0;
   const hu = w.whole ? harmonicsOf(U.t, U.v, f, w.a, w.b, kmax) : [], hi = w.whole ? harmonicsOf(U.t, iv, f, w.a, w.b, kmax) : [];
+  // fundamental: φ1 from the phases of the 1st harmonics, Q1 = U1·I1·sin φ1; the rest of S is distortion power D
+  // (√(S²−P²) alone also counts the PWM/rectifier harmonics as "reactive")
+  const fund = hu.length && hi.length && hu[0].rms > 0 && hi[0].rms > 0;
+  const phi = fund ? wrap180((hu[0].ph - hi[0].ph) * 180 / Math.PI) : phiX;
+  const Q = fund ? hu[0].rms * hi[0].rms * Math.sin(phi * Math.PI / 180) : Math.sign(phi || 0) * Math.sqrt(Math.max(0, Sva * Sva - p * p));
+  const D = fund ? Math.sqrt(Math.max(0, Sva * Sva - p * p - Q * Q)) : null, pf = Sva ? p / Sva : null;
   const thd = h => h.length > 1 && h[0].rms > 0 ? Math.sqrt(h.slice(1).reduce((s, q) => s + q.rms ** 2, 0)) / h[0].rms * 100 : null;
-  const phi1 = hu.length && hi.length ? null : null;
   const pu = UN(0), pi = UN(1), punit = pu === 'В' && pi === 'А' ? ['Вт', 'вар', 'В·А'] : ['ед.', 'ед.', 'ед.'];
   $('pwTiles').innerHTML = [
     tile('Напряжение U', fmtC(0, Ur, 4), 'СКЗ'), tile('Ток I', fmtC(1, Ir, 4), 'СКЗ'),
-    tile('Активная P', si(p * mult, punit[0], 4), mult > 1 ? '×3 фазы' : ''), tile('Реактивная Q', si(Q * mult, punit[1], 4), phi > 0 ? 'индуктивная' : phi < 0 ? 'ёмкостная' : ''),
+    tile('Активная P', si(p * mult, punit[0], 4), mult > 1 ? '×3 фазы' : ''), tile(fund ? 'Реактивная Q₁' : 'Реактивная Q', si(Q * mult, punit[1], 4), (phi > 0 ? 'индуктивная' : phi < 0 ? 'ёмкостная' : '') + (fund ? ' · по 1-й гармонике' : '')),
+    tile('Мощность искажений D', D == null ? '—' : si(D * mult, punit[2], 4), 'гармоники и шум'),
     tile('Полная S', si(Sva * mult, punit[2], 4)), tile('Коэф. мощности λ', pf == null ? '—' : pf.toFixed(3).replace('.', ',')),
-    tile('Угол φ (U→I)', deg(phi), phi > 0 ? 'ток отстаёт' : phi < 0 ? 'ток опережает' : ''), tile('cos φ', phi == null ? '—' : Math.cos(phi * Math.PI / 180).toFixed(3).replace('.', ',')),
+    tile(fund ? 'Угол φ₁ (U→I)' : 'Угол φ (U→I)', deg(phi), phi > 0 ? 'ток отстаёт' : phi < 0 ? 'ток опережает' : ''), tile(fund ? 'cos φ₁' : 'cos φ', phi == null ? '—' : Math.cos(phi * Math.PI / 180).toFixed(3).replace('.', ',')),
     tile('Частота', fHz(f)), tile('КНИ U', pct(thd(hu))), tile('КНИ I', pct(thd(hi))),
   ].join('');
   $('pwThd').textContent = hi.length ? `до ${hi.length}-й гармоники · окно ${ru.cr.length - 1} периодов` : 'нужно хотя бы 2 периода';
@@ -1491,7 +1541,7 @@ function drawPower() {
   const notes = []; if (pu !== 'В' || pi !== 'А') notes.push('для мощности в ваттах задайте на «Датчиках»: CH1 — В, CH2 — А');
   if (U.clip > 2 || I.clip > 2) notes.push('сигнал обрезан краем экрана — результат неверен');
   if (!w.whole) notes.push('меньше двух периодов на экране — развёртку медленнее');
-  notes.push('λ = P/S учитывает и сдвиг, и гармоники; cos φ — только сдвиг');
+  notes.push('λ = P/S учитывает и сдвиг, и гармоники; cos φ₁ — только сдвиг основной гармоники; S² = P² + Q₁² + D²');
   $('pwNote').textContent = notes.join(' · ');
 }
 
@@ -1613,7 +1663,9 @@ function drawPwm() {
     const ta = t[a - 1] + (l10 - v[a - 1]) / ((v[a] - v[a - 1]) || 1) * dt, tb = t[b - 1] + (l90 - v[b - 1]) / ((v[b] - v[b - 1]) || 1) * dt;
     if (tb > ta) trs.push(tb - ta);
   }
-  trs.sort((a, b) => a - b); const tr = trs.length ? trs[trs.length >> 1] : null, limited = tr != null && tr < 1.5 * dt;
+  // 2C53T: 50 MHz bandwidth → its own rise time ≈ 0.35/50 MHz ≈ 7 ns; 250 MS/s → 4 ns per real sample (faster time bases are interpolated)
+  const TR_DEV = 7e-9, DT_ADC = 4e-9;
+  trs.sort((a, b) => a - b); const tr = trs.length ? trs[trs.length >> 1] : null, limited = tr != null && (tr < 1.5 * Math.max(dt, DT_ADC) || tr < 1.5 * TR_DEV);
   const dvdt = tr ? 0.8 * A / tr : null;
   let hiCnt = 0, nearLvl = 0; for (const x of v) { if (x > lo + A / 2) hiCnt++; if (x < lo + 0.15 * A || x > hi - 0.15 * A) nearLvl++; }
   const pulses = nearLvl / n > 0.7;
@@ -1633,7 +1685,7 @@ function drawPwm() {
   ].join('');
   const notes = [];
   if (!pulses) notes.push('сигнал не похож на импульсы ШИМ (много промежуточных значений) — фронты и dV/dt не показательны');
-  if (limited) notes.push('фронт короче 1,5 точки — ускорьте развёртку, тогда dV/dt будет точным');
+  if (limited) notes.push(tr < 1.5 * TR_DEV || dt <= DT_ADC ? 'фронт на пределе 2C53T (полоса 50 МГц ≈ 7 нс, шаг АЦП 4 нс) — реальный фронт может быть ещё короче' : 'фронт короче 1,5 точки — ускорьте развёртку, тогда dV/dt будет точным');
   if (!trs.length && rate) notes.push('фронты не разрешаются — ускорьте развёртку');
   if (ch.clip > 2) notes.push('сигнал обрезан краем экрана');
   notes.push('шаг точек ' + fmtT(dt));
@@ -1693,6 +1745,8 @@ document.addEventListener('contextmenu', e => { if (!e.target.closest('input,tex
   $('avgN').value = S.avg; $('smooth').value = String(S.smooth === true ? 1 : +S.smooth || 0); segSet('zeroMode', S.zeroDev ? 'dev' : 'man'); $('fill').checked = S.fill; $('persist').checked = S.persist;
   $$('#chShow button').forEach(b => b.classList.toggle('on', !!S.show[+b.dataset.v]));
   $('holdShort').value = S.holdShort; $('holdLong').value = S.holdLong;
+  $('fpsSel').value = String(S.fps); if (!$('fpsSel').value) $('fpsSel').value = '33';
+  $('fpsSel').onchange = e => { S.fps = +e.target.value; saveSettings(); if (cur && cur.ver >= 4 && performance.now() - lastFrameAt < 2000) sendFps(); };
   buildPads(); initDrive(); startEvents(); loop(); drawFile();
 })();
 })();

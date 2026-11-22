@@ -1,7 +1,7 @@
-@font-face { font-family: Inter; font-weight: 400; src: url(fonts/Inter-Regular.otf); }
-@font-face { font-family: Inter; font-weight: 500; src: url(fonts/Inter-Medium.otf); }
-@font-face { font-family: Inter; font-weight: 600; src: url(fonts/Inter-SemiBold.otf); }
-@font-face { font-family: Inter; font-weight: 700; src: url(fonts/Inter-Bold.otf); }
+@font-face { font-family: Inter; font-weight: 400; src: url(fonts/Inter-Regular.woff2) format("woff2"); font-display: swap; }
+@font-face { font-family: Inter; font-weight: 500; src: url(fonts/Inter-Medium.woff2) format("woff2"); font-display: swap; }
+@font-face { font-family: Inter; font-weight: 600; src: url(fonts/Inter-SemiBold.woff2) format("woff2"); font-display: swap; }
+@font-face { font-family: Inter; font-weight: 700; src: url(fonts/Inter-Bold.woff2) format("woff2"); font-display: swap; }
 
 :root {
   --teal: #035B6E; --teal2: #0A7A91; --teal-soft: #E3F0F3; --orange: #F35F27; --orange-soft: #FDE9E1;
