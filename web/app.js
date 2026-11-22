@@ -43,7 +43,7 @@ const num = (x, d = 6) => x == null || !isFinite(x) ? '' : (+x.toPrecision(d)).t
 
 // ---------------- settings ----------------
 const S = { theme: 'light', keys: {}, holdShort: 6, holdLong: 90, tbDir: 1, st: { on: true, src: 'a', edge: 1, lvl: 'auto', level: 128, pos: 150 }, avg: 4, smooth: 0, zeroDev: true, sens: [{ k: 1, unit: 'В', name: '', preset: 'v1' }, { k: 1, unit: 'В', name: '', preset: 'v1' }],
-  sync: { tolF: 0.1, tolPhi: 10, tolU: 5, offset: 0 }, power: { inv: false, mult: 1 }, start: { ch: 1, thr: 0, nom: 0, pre: 3, auto: true },
+  sync: { tolF: 0.1, tolPhi: 10, tolU: 5, offset: 0, fc: 0 }, power: { inv: false, mult: 1 }, start: { ch: 1, thr: 0, nom: 0, pre: 3, auto: true },
   fps: 33, yLabels: true, pwm: { ch: 0 }, rpm: { ch: 1, ppr: 1, poles: 2, fsrc: 'ch', fman: 50 }, fill: true, persist: false, show: [1, 1], zero: [0, 0] };
 let saveT;
 function saveSettings() { clearTimeout(saveT); saveT = setTimeout(() => api('/api/settings', { method: 'POST', body: JSON.stringify(S) }).catch(() => {}), 400); }
@@ -1585,7 +1585,10 @@ function risingT(t, v, frac = 0.5, hyst = 0.1) {
   return { cr, idx, mn, mx, L };
 }
 // low-pass for the fundamental: centred (zero-phase) triangle filter ~0.8 ms — removes the kHz PWM carrier, keeps 50 Hz phase
-function lpf(t, v, tau = 0.0008) { const dt = t[1] - t[0]; const w = Math.max(3, Math.min(Math.floor(v.length / 12), Math.round(tau / dt))); return boxcarF(boxcarF(v, w), w); }
+// with a known PWM carrier the window is exactly one carrier period: a boxcar of length 1/fc nulls the carrier and all its
+// harmonics (two passes for the sidebands); 0 = default 0.8 ms (good for carriers ≥ ~1.5 kHz, weak at 800 Hz)
+const lpfTau = () => +S.sync.fc > 0 ? 1 / +S.sync.fc : 0.0008;
+function lpf(t, v, tau = lpfTau()) { const dt = t[1] - t[0]; const w = Math.max(3, Math.min(Math.floor(v.length / 12), Math.round(tau / dt))); return boxcarF(boxcarF(v, w), w); }
 const freqOf = cr => cr.length >= 2 ? (cr.length - 1) / (cr[cr.length - 1] - cr[0]) : null;
 function winStats(t, v, cr) {   // over whole periods when possible
   let a = 0, b = v.length;
@@ -1687,7 +1690,7 @@ function drawSync() {
     tile('Разность ΔU', (dU >= 0 ? '+' : '') + pct(dU), '', okU ? 'ok' : 'bad'),
   ].join('');
   $('syncTiles').innerHTML = drawSync.tiles || ''; $('syncTiles').classList.toggle('stale', !fresh);
-  $('syncNote').textContent = sg ? srcNote(sg) + ' · фильтр ШИМ включён (≈1 кГц): частота и угол считаются по основной гармонике' + (UN(0) !== UN(1) ? ' · внимание: у каналов разные единицы' : '') : 'нет данных от прибора';
+  $('syncNote').textContent = sg ? srcNote(sg) + (+S.sync.fc > 0 ? ` · фильтр ШИМ под несущую ${S.sync.fc} Гц` : ' · фильтр ШИМ (для несущей от ~1,5 кГц; ниже — задайте несущую)') + ': частота и угол по основной гармонике' + (UN(0) !== UN(1) ? ' · внимание: у каналов разные единицы' : '') : 'нет данных от прибора';
   miniScope('syncScope');
 }
 
@@ -2301,6 +2304,7 @@ function initDrive() {
   buildSensors();
   const bindNum = (id, obj, key, after) => { const el = $(id); el.value = obj[key]; el.onchange = () => { const v = parseFloat(String(el.value).replace(',', '.')); if (isFinite(v)) { obj[key] = v; saveSettings(); after && after(); needDraw = true; } }; };
   bindNum('syTolF', S.sync, 'tolF'); bindNum('syTolPhi', S.sync, 'tolPhi'); bindNum('syTolU', S.sync, 'tolU'); bindNum('syOff', S.sync, 'offset', () => { syncHist.length = 0; });
+  bindNum('syFc', S.sync, 'fc', () => { if (!(S.sync.fc >= 0)) S.sync.fc = 0; if (S.sync.fc > 0 && S.sync.fc < 200) { S.sync.fc = 0; toast('Несущая ниже 200 Гц не поддерживается — фильтр по умолчанию'); } $('syFc').value = S.sync.fc; syncHist.length = 0; });
   $('pwMult').value = String(S.power.mult); $('pwMult').onchange = e => { S.power.mult = +e.target.value; saveSettings(); needDraw = true; };
   $('pwInv').checked = !!S.power.inv; $('pwInv').onchange = e => { S.power.inv = e.target.checked; saveSettings(); needDraw = true; };
   segSet('stCh', S.start.ch); segInit('stCh', v => { S.start.ch = +v; saveSettings(); needDraw = true; });

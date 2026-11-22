@@ -27,7 +27,7 @@
   <div class="conn" id="conn" title="Состояние связи"><i class="dot"></i><span id="connText">поиск прибора…</span></div>
   <button class="ibtn" id="bPort" title="Выбор порта"><svg viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0zM12 17v4"/></svg></button>
   <button class="ibtn" id="bTheme" title="Светлая / тёмная тема"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg></button>
-  <span class="ver" id="ver">v1.6.0</span>
+  <span class="ver" id="ver">v1.6.1</span>
 </header>
 
 <div class="body">
@@ -230,6 +230,7 @@
             <div class="row"><span>Допуск Δf</span><input type="number" id="syTolF" step="0.01" min="0.01"><span class="u">Гц</span></div>
             <div class="row"><span>Допуск Δφ</span><input type="number" id="syTolPhi" step="1" min="1"><span class="u">°</span></div>
             <div class="row"><span>Допуск ΔU</span><input type="number" id="syTolU" step="0.5" min="0.5"><span class="u">%</span></div>
+            <div class="row"><span>Несущая ШИМ</span><input type="number" id="syFc" step="any" min="0" placeholder="0"><span class="u" title="Частота коммутации (несущая) частотника — из его параметров. Фильтр подстроится ровно под неё и полностью уберёт её из расчёта угла и частоты. 0 — фильтр по умолчанию (хорош для несущей от ~1,5 кГц). Действует на синхроскоп, мощность, анализатор, регистратор и измерения частоты.">Гц, 0 — авто</span></div>
             <div class="row"><span>Поправка угла</span><input type="number" id="syOff" step="1"><span class="u" title="если на CH1 и CH2 разные пары фаз, например Uab и Ua — поправка 30°">°</span></div>
             <div class="stinfo" id="syncNote">—</div>
             <div class="stinfo warn gnd">⚠ У 2C53T минусы (земли) CH1 и CH2 соединены между собой, а при подключённом USB — ещё и с землёй компьютера. К сети подключайтесь только через изолирующие датчики (ТН, токовые клещи, дифференциальный пробник), оба минуса — на одну общую точку. Минус щупа на фазу не подключать: это короткое замыкание через прибор и ПК.</div>
@@ -465,7 +466,7 @@
     <section class="view" id="v-about">
       <div class="card about">
         <svg class="logo big" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="var(--teal)"/><path d="M5 18h4l3-9 4 15 3-11 2 5h6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="26" cy="18" r="2.2" fill="var(--orange)"/></svg>
-        <h2>PUFService <span class="ver" id="ver2">v1.6.0</span></h2>
+        <h2>PUFService <span class="ver" id="ver2">v1.6.1</span></h2>
         <p>Программа для работы с осциллографом FNIRSI 2C53T с доработанной прошивкой <b>RU_USB4</b>: просмотр сигнала в реальном времени, программная стабилизация, удалённое управление кнопками и просмотр сохранённых осциллограмм.</p>
         <ul>
           <li>Онлайн-режим работает, когда прибор подключён кабелем и находится в режиме осциллографа.</li>
